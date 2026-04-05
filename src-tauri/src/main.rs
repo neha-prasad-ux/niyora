@@ -7,6 +7,11 @@ use tauri::{
     Manager,
 };
 use tauri_plugin_positioner::{Position, WindowExt};
+use chrono::Timelike;
+use tauri_plugin_notification::NotificationExt;
+
+#[cfg(target_os = "macos")]
+use cocoa::appkit::{NSApp, NSApplication};
 
 fn main() {
     tauri::Builder::default()
@@ -41,8 +46,16 @@ fn main() {
                             if window.is_visible().unwrap_or(false) {
                                 let _ = window.hide();
                             } else {
-                                // Position below the tray icon, then show
-                                let _ = window.as_ref().window().move_window(Position::TrayBottomCenter);
+                                // Position below the tray icon
+                                let _ = window.move_window(Position::TrayBottomCenter);
+
+                                // Activate the app so macOS allows the window to appear
+                                #[cfg(target_os = "macos")]
+                                unsafe {
+                                    let ns_app = NSApp();
+                                    ns_app.activateIgnoringOtherApps_(true);
+                                }
+
                                 let _ = window.show();
                                 let _ = window.set_focus();
                             }
@@ -86,6 +99,3 @@ fn reminder_loop(app: tauri::AppHandle) {
         sleep(Duration::from_secs(2 * 60 * 60));
     }
 }
-
-use chrono::Timelike;
-use tauri_plugin_notification::NotificationExt;
