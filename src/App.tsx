@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
 
 const PHASES = ["Inhale", "Hold", "Exhale", "Hold"] as const;
@@ -16,6 +16,14 @@ function App() {
   const [isDone, setIsDone] = useState(false);
 
   const phase: Phase = PHASES[phaseIndex];
+
+  const resetState = useCallback(() => {
+    setRound(1);
+    setPhaseIndex(0);
+    setCountdown(SECONDS_PER_PHASE);
+    setIsDone(false);
+    setIsRunning(true);
+  }, []);
 
   // Progress through phases and rounds
   useEffect(() => {
@@ -49,16 +57,21 @@ function App() {
     return () => clearInterval(timer);
   }, [isRunning, isDone, phaseIndex, round]);
 
+  // Reset state when panel is hidden (re-opened from tray starts fresh)
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.hidden) {
+        resetState();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [resetState]);
+
   const handleClose = useCallback(async () => {
-    const win = getCurrentWindow();
-    await win.hide();
-    // Reset state for next open
-    setRound(1);
-    setPhaseIndex(0);
-    setCountdown(SECONDS_PER_PHASE);
-    setIsDone(false);
-    setIsRunning(true);
-  }, []);
+    await invoke("hide_panel");
+    resetState();
+  }, [resetState]);
 
   // Calculate overall progress (0 to 1)
   const totalPhases = TOTAL_ROUNDS * PHASES.length;
@@ -68,6 +81,13 @@ function App() {
 
   return (
     <div className="container">
+      {/* Close X button in top-right corner */}
+      <button className="close-x" onClick={handleClose} title="Close">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+          <path d="M2 2l10 10M12 2L2 12" />
+        </svg>
+      </button>
+
       <div className="content">
         <h1 className="title">Niyora</h1>
 
@@ -124,8 +144,8 @@ function App() {
           <div className="progress-fill" style={{ width: `${progress * 100}%` }} />
         </div>
 
-        <button className="close-button" onClick={handleClose}>
-          {isDone ? "Close" : "Done"}
+        <button className="done-button" onClick={handleClose}>
+          Done
         </button>
       </div>
     </div>
