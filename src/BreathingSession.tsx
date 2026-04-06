@@ -615,6 +615,38 @@ export default function BreathingSession({ onComplete }: Props) {
         }
       }
 
+      // ── TRATAKA FOCAL POINT (only for "orbit" motion) ──
+      if (visual.motion === "orbit" && s.introDone) {
+        const focusX = cx, focusY = cy;
+        // Gentle breathing glow — very slow pulse
+        const pulse = 0.5 + Math.sin(s.time * 0.6) * 0.15;
+        const glowOpacity = s.done ? lerpVal(0.5, 0, Math.min(s.doneTime / 3, 1)) : pulse;
+
+        // Outer halo (large, soft)
+        const grad3 = ctx.createRadialGradient(focusX, focusY, 0, focusX, focusY, 50);
+        grad3.addColorStop(0, `hsla(40, 50%, 55%, ${glowOpacity * 0.08})`);
+        grad3.addColorStop(1, `hsla(40, 50%, 55%, 0)`);
+        ctx.fillStyle = grad3; ctx.fillRect(focusX - 50, focusY - 50, 100, 100);
+
+        // Middle glow
+        const grad2 = ctx.createRadialGradient(focusX, focusY, 0, focusX, focusY, 22);
+        grad2.addColorStop(0, `hsla(38, 55%, 60%, ${glowOpacity * 0.25})`);
+        grad2.addColorStop(1, `hsla(38, 55%, 60%, 0)`);
+        ctx.fillStyle = grad2; ctx.fillRect(focusX - 22, focusY - 22, 44, 44);
+
+        // Core dot — warm golden, steady
+        ctx.beginPath();
+        ctx.arc(focusX, focusY, 4 + pulse * 1.5, 0, Math.PI * 2);
+        ctx.fillStyle = `hsla(38, 60%, 65%, ${glowOpacity * 0.9})`;
+        ctx.fill();
+
+        // Inner bright point
+        ctx.beginPath();
+        ctx.arc(focusX, focusY, 1.5, 0, Math.PI * 2);
+        ctx.fillStyle = `hsla(40, 40%, 85%, ${glowOpacity * 0.8})`;
+        ctx.fill();
+      }
+
       const boost = visual.brightnessBoost || 0;
       for (const p of s.particles) {
         const ph = h + (p.noiseOffsetX % 20 - 10);
