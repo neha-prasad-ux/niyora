@@ -139,6 +139,8 @@ fn toggle_panel(app_handle: &tauri::AppHandle) {
     // Position below the tray icon using the positioner plugin
     if let Some(window) = app_handle.get_webview_window("main") {
         let _ = window.move_window(Position::TrayBottomCenter);
+        // Tell the frontend to reset for a fresh session
+        let _ = window.eval("window.__NIYORA_RESET && window.__NIYORA_RESET()");
     }
 
     panel.show();
