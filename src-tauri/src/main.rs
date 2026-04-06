@@ -1,4 +1,4 @@
-// Prevents additional console window on Windows in release
+// Niyora — macOS menu bar breathing & mindfulness app
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use tauri::{
@@ -136,13 +136,15 @@ fn toggle_panel(app_handle: &tauri::AppHandle) {
         return;
     }
 
-    // Position below the tray icon using the positioner plugin
+    // Position below the tray icon and reload for a fresh session
     if let Some(window) = app_handle.get_webview_window("main") {
         let _ = window.move_window(Position::TrayBottomCenter);
-        // Tell the frontend to reset for a fresh session
-        let _ = window.eval("window.__NIYORA_RESET && window.__NIYORA_RESET()");
+        // Reload the webview to get a completely fresh React mount
+        let _ = window.eval("window.location.reload()");
     }
 
+    // Small delay to let reload start before showing
+    std::thread::sleep(std::time::Duration::from_millis(50));
     panel.show();
 }
 
