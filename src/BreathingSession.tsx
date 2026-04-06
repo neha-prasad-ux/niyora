@@ -204,15 +204,41 @@ function motionSedation(p: Particle, ndx: number, ndy: number, dist: number,
 
 function motionRiver(p: Particle, _n: number, _n2: number, _d: number,
   _pt: string, _phaseT: number, t: number, dt: number, nx: number, ny: number): ForceResult {
-  // Gentle left-to-right river current
-  let fx = 0.4 + nx * 0.2;
-  let fy = ny * 0.15 + Math.sin(t * 0.6 + p.noiseOffsetX * 2) * 0.15;
-  // Slight vertical undulation like water
-  fy += Math.sin(p.x / WIDTH * Math.PI * 3 + t * 0.5) * 0.12;
-  p.opacity = lerpVal(p.opacity, 0.4 + Math.sin(t * 0.8 + p.noiseOffsetY) * 0.1, dt * 1.5);
-  // Wrap right to left
-  if (p.x > WIDTH + 30) { p.x = -20; p.y = HEIGHT * 0.3 + Math.random() * HEIGHT * 0.4; }
-  return { fx, fy };
+  const riverY = HEIGHT * 0.5;
+  const riverBand = 80;
+  const isWater = p.noiseOffsetX % 1 < 0.6; // 60% water, 40% air
+
+  if (isWater) {
+    // Water particles: flow rightward within the river band
+    let fx = 0.5 + nx * 0.15;
+    let fy = ny * 0.1;
+    // Undulation with the water lines
+    fy += Math.sin(p.x / WIDTH * Math.PI * 2.5 + t * 0.7 + p.noiseOffsetY) * 0.12;
+    // Pull toward river band vertically
+    const distFromRiver = p.y - riverY;
+    fy -= distFromRiver * 0.008;
+    p.opacity = lerpVal(p.opacity, 0.35 + Math.sin(t * 0.8 + p.noiseOffsetY) * 0.1, dt * 1.5);
+    p.size = lerpVal(p.size, p.baseSize * 0.9, dt * 2);
+    // Wrap right to left within river band
+    if (p.x > WIDTH + 20) {
+      p.x = -15;
+      p.y = riverY + (Math.random() - 0.5) * riverBand * 0.8;
+    }
+    return { fx, fy };
+  } else {
+    // Air particles: gentle ambient drift above and below the river
+    let fx = nx * 0.25 + 0.05; // very slight rightward drift
+    let fy = ny * 0.25;
+    // Push away from river center to create clear separation
+    const distFromRiver = p.y - riverY;
+    if (Math.abs(distFromRiver) < riverBand * 0.6) {
+      fy += Math.sign(distFromRiver) * 0.1;
+    }
+    p.opacity = lerpVal(p.opacity, 0.2 + Math.sin(t * 0.5 + p.noiseOffsetX) * 0.05, dt * 1);
+    p.size = lerpVal(p.size, p.baseSize * 0.7, dt * 2);
+    if (p.x > WIDTH + 30) { p.x = -20; }
+    return { fx, fy };
+  }
 }
 
 function motionWarmPulse(p: Particle, ndx: number, ndy: number, dist: number,
@@ -301,6 +327,8 @@ interface AnimState {
   phaseIndex: number; phaseTime: number; round: number;
   // Mindfulness state
   promptIndex: number; promptTime: number; promptOpacity: number;
+  // River/leaf state (for "Leaves on a Stream")
+  leafX: number; leafY: number; leafOpacity: number; leafVisible: boolean;
   // Shared
   done: boolean; doneTime: number;
   bgColor: [number, number, number]; targetBgColor: [number, number, number];
@@ -315,6 +343,7 @@ function createState(): AnimState {
     time: 0, introTime: 0, introDone: false,
     phaseIndex: 0, phaseTime: 0, round: 0,
     promptIndex: 0, promptTime: 0, promptOpacity: 0,
+    leafX: WIDTH * 0.35, leafY: HEIGHT * 0.5, leafOpacity: 0, leafVisible: false,
     done: false, doneTime: 0,
     bgColor: [260, 15, 11], targetBgColor: [260, 15, 11],
     labelOpacity: 0, nameOpacity: 0, subtitleOpacity: 0,
@@ -499,6 +528,92 @@ export default function BreathingSession({ onComplete }: Props) {
       // ── RENDER ──
       const [h, sat, l] = s.bgColor;
       ctx.fillStyle = `hsl(${h}, ${sat}%, ${l}%)`; ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+      // ── RIVER + LEAF (only for "river" motion) ──
+      if (visual.motion === "river" && s.introDone && !s.done) {
+        const riverY = HEIGHT * 0.5; // river center line
+        const riverBand = 80; // river height band
+
+        // Draw flowing water lines
+        ctx.save();
+        for (let i = 0; i < 6; i++) {
+          const lineY = riverY - riverBand / 2 + (riverBand / 5) * i;
+          const lineOpacity = 0.06 + (i === 2 || i === 3 ? 0.03 : 0);
+          ctx.beginPath();
+          ctx.moveTo(-10, lineY);
+          for (let x = 0; x <= WIDTH + 10; x += 5) {
+            const wave = Math.sin((x / WIDTH) * Math.PI * 2.5 + s.time * 0.7 + i * 0.8) * 6;
+            const wave2 = Math.sin((x / WIDTH) * Math.PI * 4 + s.time * 0.4 + i * 1.2) * 3;
+            ctx.lineTo(x, lineY + wave + wave2);
+          }
+          ctx.strokeStyle = `hsla(${h + 10}, ${sat + 15}%, ${l + 20}%, ${lineOpacity})`;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        }
+        ctx.restore();
+
+        // Update leaf position based on prompt
+        const pi = s.promptIndex;
+        if (pi >= 1 && pi <= 3) {
+          s.leafVisible = true;
+          if (pi === 1) {
+            // "place the thought on a leaf" — leaf fades in at center-left
+            s.leafOpacity = lerpVal(s.leafOpacity, 0.8, dt * 2);
+            s.leafX = lerpVal(s.leafX, WIDTH * 0.35, dt * 0.5);
+          } else if (pi === 2) {
+            // "watch it float gently downstream" — leaf drifts right
+            s.leafOpacity = lerpVal(s.leafOpacity, 0.75, dt * 1);
+            s.leafX += dt * 18; // steady rightward drift
+          } else if (pi === 3) {
+            // "let the stream carry it away" — leaf at far right, fading
+            s.leafX += dt * 25;
+            s.leafOpacity = lerpVal(s.leafOpacity, 0, dt * 1.5);
+          }
+          // Gentle bobbing on the water
+          s.leafY = riverY + Math.sin(s.time * 1.2 + 1) * 5;
+        } else {
+          s.leafVisible = false;
+          s.leafOpacity = lerpVal(s.leafOpacity, 0, dt * 3);
+          // Reset position for next time
+          if (pi === 0) { s.leafX = WIDTH * 0.35; }
+        }
+
+        // Draw the leaf
+        if (s.leafOpacity > 0.01) {
+          ctx.save();
+          ctx.translate(s.leafX, s.leafY);
+          // Slight rotation from bobbing
+          ctx.rotate(Math.sin(s.time * 0.8) * 0.15);
+          ctx.globalAlpha = s.leafOpacity;
+
+          // Leaf shape — two bezier curves
+          const lw = 14, lh = 8;
+          ctx.beginPath();
+          ctx.moveTo(-lw / 2, 0);
+          ctx.quadraticCurveTo(0, -lh, lw / 2, 0);
+          ctx.quadraticCurveTo(0, lh, -lw / 2, 0);
+          ctx.closePath();
+          ctx.fillStyle = `hsla(90, 35%, 35%, 1)`;
+          ctx.fill();
+
+          // Leaf vein
+          ctx.beginPath();
+          ctx.moveTo(-lw / 2 + 2, 0);
+          ctx.lineTo(lw / 2 - 2, 0);
+          ctx.strokeStyle = `hsla(90, 25%, 28%, 0.6)`;
+          ctx.lineWidth = 0.7;
+          ctx.stroke();
+
+          // Soft glow around leaf
+          ctx.beginPath();
+          ctx.arc(0, 0, 16, 0, Math.PI * 2);
+          ctx.fillStyle = `hsla(80, 30%, 40%, ${s.leafOpacity * 0.1})`;
+          ctx.fill();
+
+          ctx.globalAlpha = 1;
+          ctx.restore();
+        }
+      }
 
       const boost = visual.brightnessBoost || 0;
       for (const p of s.particles) {
