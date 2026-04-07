@@ -393,8 +393,8 @@ export default function BreathingSession({ onComplete }: Props) {
       // ── INTRO ──
       if (!s.introDone) {
         s.introTime += dt;
-        if (s.introTime < 1) { s.nameOpacity = lerpVal(s.nameOpacity, 0.7, dt * 4); s.subtitleOpacity = lerpVal(s.subtitleOpacity, 0.35, dt * 3); }
-        else if (s.introTime < 2) { s.nameOpacity = 0.7; s.subtitleOpacity = 0.35; }
+        if (s.introTime < 1) { s.nameOpacity = lerpVal(s.nameOpacity, 0.9, dt * 4); s.subtitleOpacity = lerpVal(s.subtitleOpacity, 0.55, dt * 3); }
+        else if (s.introTime < 2) { s.nameOpacity = 0.9; s.subtitleOpacity = 0.55; }
         else { s.nameOpacity = lerpVal(s.nameOpacity, 0, dt * 4); s.subtitleOpacity = lerpVal(s.subtitleOpacity, 0, dt * 4); }
         if (s.introTime >= INTRO_DURATION) {
           s.introDone = true; s.nameOpacity = 0; s.subtitleOpacity = 0;
@@ -441,7 +441,7 @@ export default function BreathingSession({ onComplete }: Props) {
         // Fade in first 1.5s, hold, fade out last 1s
         const fadeIn = Math.min(s.promptTime / 1.5, 1);
         const fadeOut = s.promptTime > prompt.duration - 1 ? Math.max(0, (prompt.duration - s.promptTime) / 1) : 1;
-        s.promptOpacity = lerpVal(s.promptOpacity, fadeIn * fadeOut * 0.6, dt * 4);
+        s.promptOpacity = lerpVal(s.promptOpacity, fadeIn * fadeOut * 0.85, dt * 4);
 
         // Shift background color slowly through the palette
         const colorT = s.promptIndex / mt.prompts.length;
@@ -527,7 +527,18 @@ export default function BreathingSession({ onComplete }: Props) {
 
       // ── RENDER ──
       const [h, sat, l] = s.bgColor;
-      ctx.fillStyle = `hsl(${h}, ${sat}%, ${l}%)`; ctx.fillRect(0, 0, WIDTH, HEIGHT);
+      // Background: vertical gradient — colored at top, dark at bottom
+      const bgGrad = ctx.createLinearGradient(0, 0, 0, HEIGHT);
+      bgGrad.addColorStop(0, `hsl(${h}, ${Math.min(sat + 15, 45)}%, ${l + 6}%)`);
+      bgGrad.addColorStop(0.5, `hsl(${h}, ${sat}%, ${l}%)`);
+      bgGrad.addColorStop(1, `hsl(${h}, ${Math.max(sat - 5, 5)}%, ${Math.max(l - 3, 5)}%)`);
+      ctx.fillStyle = bgGrad; ctx.fillRect(0, 0, WIDTH, HEIGHT);
+      // Center radial glow overlay
+      const glowGrad = ctx.createRadialGradient(cx, cy * 0.7, 0, cx, cy * 0.7, HEIGHT * 0.5);
+      glowGrad.addColorStop(0, `hsla(${h}, ${Math.min(sat + 30, 60)}%, ${l + 10}%, 0.2)`);
+      glowGrad.addColorStop(0.6, `hsla(${h}, ${Math.min(sat + 15, 50)}%, ${l + 4}%, 0.06)`);
+      glowGrad.addColorStop(1, `hsla(${h}, ${sat}%, ${l}%, 0)`);
+      ctx.fillStyle = glowGrad; ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
       // ── RIVER + LEAF (only for "river" motion) ──
       if (visual.motion === "river" && s.introDone && !s.done) {
@@ -650,53 +661,72 @@ export default function BreathingSession({ onComplete }: Props) {
       const boost = visual.brightnessBoost || 0;
       for (const p of s.particles) {
         const ph = h + (p.noiseOffsetX % 20 - 10);
-        const ps = Math.min(sat + 50, 90); const pl = Math.min(l + 50 + boost * 100, 85);
-        const op = Math.min(p.opacity + 0.25, 0.95);
-        ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        ctx.fillStyle = `hsla(${ph}, ${ps}%, ${pl}%, ${op})`; ctx.fill();
-        ctx.beginPath(); ctx.arc(p.x, p.y, p.size * 4, 0, Math.PI * 2);
-        ctx.fillStyle = `hsla(${ph}, ${ps}%, ${pl}%, ${op * 0.12})`; ctx.fill();
+        const ps = Math.min(sat + 50, 90);
+        const pl = Math.min(l + 50 + boost * 100, 85);
+        const op = Math.min(p.opacity + 0.1, 0.75);
+        const r = p.size;
+
+        // Outer glow aura
+        const auraR = r * 5;
+        const aura = ctx.createRadialGradient(p.x, p.y, r * 0.5, p.x, p.y, auraR);
+        aura.addColorStop(0, `hsla(${ph}, ${ps}%, ${pl}%, ${op * 0.15})`);
+        aura.addColorStop(1, `hsla(${ph}, ${ps}%, ${pl}%, 0)`);
+        ctx.fillStyle = aura;
+        ctx.fillRect(p.x - auraR, p.y - auraR, auraR * 2, auraR * 2);
+
+        // Sphere body — radial gradient with highlight
+        const hlX = p.x - r * 0.3; // highlight offset top-left
+        const hlY = p.y - r * 0.3;
+        const sphere = ctx.createRadialGradient(hlX, hlY, r * 0.1, p.x, p.y, r);
+        sphere.addColorStop(0, `hsla(${ph}, ${Math.max(ps - 15, 20)}%, ${Math.min(pl + 25, 95)}%, ${op})`); // bright highlight
+        sphere.addColorStop(0.4, `hsla(${ph}, ${ps}%, ${pl}%, ${op})`); // mid body
+        sphere.addColorStop(0.8, `hsla(${ph}, ${ps + 5}%, ${Math.max(pl - 10, 15)}%, ${op})`); // darker edge
+        sphere.addColorStop(1, `hsla(${ph}, ${ps + 10}%, ${Math.max(pl - 20, 10)}%, ${op * 0.6})`); // shadow edge
+        ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = sphere; ctx.fill();
       }
 
       // ── TEXT ──
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.letterSpacing = "1.5px";
 
       if (!s.introDone) {
-        ctx.font = "300 22px -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.font = "300 22px 'Source Serif 4', Georgia, serif";
         ctx.fillStyle = `rgba(255, 255, 255, ${s.nameOpacity})`;
-        ctx.fillText(technique.name, cx, cy - 14);
-        ctx.font = "300 13px -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.fillText(technique.name, cx, HEIGHT * 0.68);
+        ctx.font = "300 13px 'Source Serif 4', Georgia, serif";
         ctx.fillStyle = `rgba(255, 255, 255, ${s.subtitleOpacity})`;
-        ctx.fillText(technique.subtitle, cx, cy + 14);
+        ctx.fillText(technique.subtitle, cx, HEIGHT * 0.68 + 24);
       } else if (s.done) {
         const doneT = s.doneTime;
-        const targetOp = doneT > 1.0 ? 0.65 : 0;
+        const targetOp = doneT > 1.0 ? 0.85 : 0;
         s.labelOpacity = lerpVal(s.labelOpacity, targetOp, dt * 2.5);
         if (doneT > 5.5) s.labelOpacity = lerpVal(s.labelOpacity, 0, dt * 3);
-        ctx.font = "200 20px -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.font = "200 20px 'Source Serif 4', Georgia, serif";
         ctx.fillStyle = `rgba(255, 245, 230, ${s.labelOpacity})`;
-        ctx.fillText("well done", cx, cy - 8);
+        ctx.fillText("well done", cx, HEIGHT * 0.70);
         if (doneT > 1.8) {
           const subOp = Math.min((doneT - 1.8) * 0.8, 0.3);
           const subFinal = doneT > 5.5 ? lerpVal(subOp, 0, (doneT - 5.5) * 2) : subOp;
-          ctx.font = "300 12px -apple-system, BlinkMacSystemFont, sans-serif";
+          ctx.font = "300 12px 'Source Serif 4', Georgia, serif";
           ctx.fillStyle = `rgba(255, 245, 230, ${Math.max(0, subFinal)})`;
-          ctx.fillText("take this calm with you", cx, cy + 16);
+          ctx.fillText("take this calm with you", cx, HEIGHT * 0.70 + 24);
         }
       } else if (isMindful) {
-        // Mindfulness prompt text — centered, wrapped, gentle
-        ctx.font = "300 17px -apple-system, BlinkMacSystemFont, sans-serif";
+        // Mindfulness prompt text — lower third, wrapped, gentle
+        ctx.font = "300 17px 'Source Serif 4', Georgia, serif";
         ctx.fillStyle = `rgba(255, 250, 240, ${s.promptOpacity})`;
         const lines = wrapText(ctx, currentPromptText, WIDTH - 60);
         const lineHeight = 24;
-        const startY = cy - ((lines.length - 1) * lineHeight) / 2;
+        const textY = HEIGHT * 0.72;
+        const startY = textY - ((lines.length - 1) * lineHeight) / 2;
         lines.forEach((line, i) => ctx.fillText(line, cx, startY + i * lineHeight));
       } else {
         // Breathing instruction
-        s.labelOpacity = lerpVal(s.labelOpacity, 0.5, dt * 3);
-        ctx.font = "300 15px -apple-system, BlinkMacSystemFont, sans-serif";
+        s.labelOpacity = lerpVal(s.labelOpacity, 0.9, dt * 3);
+        ctx.font = "300 15px 'Source Serif 4', Georgia, serif";
         ctx.fillStyle = `rgba(255, 255, 255, ${s.labelOpacity})`;
-        ctx.fillText(currentLabel, cx, cy);
+        ctx.fillText(currentLabel, cx, HEIGHT * 0.72);
       }
 
       // Round dots (breathing only)
@@ -732,7 +762,7 @@ export default function BreathingSession({ onComplete }: Props) {
   }, [onComplete]);
 
   return (
-    <div style={{ width: WIDTH, height: HEIGHT, borderRadius: 12, overflow: "hidden", position: "relative", cursor: "default", userSelect: "none" }}>
+    <div style={{ width: WIDTH, height: HEIGHT, borderRadius: 16, overflow: "hidden", position: "relative", cursor: "default", userSelect: "none" }}>
       <canvas ref={canvasRef} style={{ width: WIDTH, height: HEIGHT, display: "block" }} />
       <button onClick={handleDone} title="Close" style={{
         position: "absolute", top: 8, right: 8, width: 26, height: 26,

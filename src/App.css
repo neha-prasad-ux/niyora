@@ -8,8 +8,8 @@ html, body, #root {
   width: 300px;
   height: 380px;
   overflow: hidden;
-  background: #0d0b09;
-  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  background: transparent;
+  font-family: 'Source Serif 4', Georgia, serif;
   -webkit-font-smoothing: antialiased;
   user-select: none;
 }
