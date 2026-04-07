@@ -57,13 +57,8 @@ jobs:
       - name: Ad-hoc codesign
         run: codesign -s - --force --deep "src-tauri/target/${{ matrix.target }}/release/bundle/macos/Niyora.app"
 
-      - name: Create zip
-        run: |
-          cd "src-tauri/target/${{ matrix.target }}/release/bundle/macos"
-          ditto -c -k --keepParent Niyora.app "Niyora-${{ matrix.arch }}.zip"
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: Niyora-${{ matrix.arch }}
-          path: src-tauri/target/${{ matrix.target }}/release/bundle/macos/Niyora-${{ matrix.arch }}.zip
+          path: src-tauri/target/${{ matrix.target }}/release/bundle/macos/Niyora.app
