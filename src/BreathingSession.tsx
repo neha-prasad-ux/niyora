@@ -5,7 +5,6 @@ import {
   type Technique,
   type BreathingTechnique,
   type MindfulnessTechnique,
-  type VisualConfig,
 } from "./techniques";
 
 // --- Config ---
@@ -429,14 +428,14 @@ export default function BreathingSession({ onComplete }: Props) {
 
       // ── MINDFULNESS logic ──
       let currentPromptText = "";
-      let promptProgress = 0;
+      // prompt progress tracking
 
       if (s.introDone && !s.done && isMindful) {
         const mt = technique as MindfulnessTechnique;
         const prompt = mt.prompts[s.promptIndex];
         currentPromptText = prompt.text;
         s.promptTime += dt;
-        promptProgress = Math.min(s.promptTime / prompt.duration, 1);
+        // promptProgress used implicitly via s.promptTime / prompt.duration
 
         // Fade in first 1.5s, hold, fade out last 1s
         const fadeIn = Math.min(s.promptTime / 1.5, 1);
