@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Niyora — Calm in 60 seconds</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Poppins', sans-serif;
+      background: #0a0814;
+      color: #fff;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+    .hero {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      text-align: center;
+      padding: 40px 24px;
+      background: radial-gradient(ellipse at 50% 30%, rgba(100, 60, 180, 0.15) 0%, transparent 60%),
+                  radial-gradient(ellipse at 50% 80%, rgba(60, 40, 120, 0.1) 0%, transparent 50%);
+    }
+    .logo { width: 72px; height: 72px; margin-bottom: 16px; opacity: 0.9; }
+    .brand { font-size: 14px; font-weight: 500; letter-spacing: 4px; text-transform: uppercase; color: rgba(255,255,255,0.4); margin-bottom: 6px; }
+    .tagline { font-size: 13px; font-weight: 300; color: rgba(255,255,255,0.25); margin-bottom: 48px; }
+    h1 { font-size: 42px; font-weight: 500; line-height: 1.3; margin-bottom: 16px; color: rgba(255,255,255,0.9); }
+    .subtitle { font-size: 18px; font-weight: 300; color: rgba(255,255,255,0.5); max-width: 500px; line-height: 1.7; margin-bottom: 48px; }
+    .cta {
+      display: inline-block;
+      padding: 14px 40px;
+      border-radius: 28px;
+      background: linear-gradient(135deg, hsla(270, 50%, 45%, 0.8), hsla(280, 40%, 35%, 0.8));
+      border: 1px solid hsla(270, 40%, 55%, 0.3);
+      color: rgba(255,255,255,0.9);
+      font-size: 16px; font-weight: 500; font-family: 'Poppins', sans-serif;
+      text-decoration: none;
+      letter-spacing: 1px;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 24px hsla(270, 50%, 40%, 0.3);
+    }
+    .cta:hover {
+      background: linear-gradient(135deg, hsla(270, 55%, 50%, 0.9), hsla(280, 45%, 40%, 0.9));
+      box-shadow: 0 6px 32px hsla(270, 50%, 40%, 0.5);
+      transform: translateY(-1px);
+    }
+    .features {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 32px;
+      max-width: 800px;
+      margin: 64px auto 0;
+      padding: 0 24px;
+    }
+    .feature {
+      flex: 1 1 200px;
+      max-width: 220px;
+      text-align: center;
+    }
+    .feature h3 { font-size: 14px; font-weight: 500; color: rgba(255,255,255,0.7); margin-bottom: 8px; }
+    .feature p { font-size: 12px; font-weight: 300; color: rgba(255,255,255,0.35); line-height: 1.6; }
+    footer {
+      text-align: center;
+      padding: 48px 24px;
+      color: rgba(255,255,255,0.2);
+      font-size: 12px;
+    }
+    footer a { color: rgba(255,255,255,0.35); text-decoration: none; margin: 0 12px; }
+    footer a:hover { color: rgba(255,255,255,0.6); }
+  </style>
+</head>
+<body>
+  <div class="hero">
+    <img src="icon.png" alt="Niyora" class="logo" />
+    <div class="brand">Niyora</div>
+    <div class="tagline">Calm in 60 seconds</div>
+    <h1>Breathe better.<br>Right from your menu bar.</h1>
+    <p class="subtitle">
+      7 pranayama techniques and 7 mindfulness moments, backed by science.
+      A macOS app that lives in your menu bar and reminds you to breathe.
+    </p>
+    <a href="https://github.com/neha-prasad-ux/niyora/releases/latest" class="cta">Download for macOS</a>
+    <div class="features">
+      <div class="feature">
+        <h3>Smart Reminders</h3>
+        <p>Notifies you after 90 minutes of screen time. Resets when you complete a session.</p>
+      </div>
+      <div class="feature">
+        <h3>14 Techniques</h3>
+        <p>From Box Breathing to Trataka. Each selected based on scientific evidence.</p>
+      </div>
+      <div class="feature">
+        <h3>Ambient Audio</h3>
+        <p>Ocean waves, forest birds, or serene pads. Fades in and out with your session.</p>
+      </div>
+    </div>
+  </div>
+  <footer>
+    &copy; 2026 Niyora. All rights reserved.
+    <br><br>
+    <a href="/privacy">Privacy Policy</a>
+    <a href="/terms">Terms of Service</a>
+  </footer>
+</body>
+</html>
