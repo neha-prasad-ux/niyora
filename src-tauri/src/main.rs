@@ -1,6 +1,9 @@
 // Niyora — macOS menu bar breathing & mindfulness app
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+
 use tauri::{
     image::Image,
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -18,8 +21,24 @@ use tauri_nspanel::{
 
 const NSPANEL_STYLE_MASK_NON_ACTIVATING: i32 = 1 << 7;
 
+/// Shared timestamp of the last completed breathing session (or app launch).
+/// Reset when user completes a session; checked by the reminder loop.
+struct LastSessionTime(Arc<Mutex<Instant>>);
+
+#[tauri::command]
+fn resize_panel(app_handle: tauri::AppHandle, width: f64, height: f64) {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width, height }));
+    }
+}
+
 #[tauri::command]
 fn hide_panel(app_handle: tauri::AppHandle) {
+    // Reset the screen-time timer — user just completed a session
+    if let Some(state) = app_handle.try_state::<LastSessionTime>() {
+        *state.0.lock().unwrap() = Instant::now();
+    }
+
     #[cfg(target_os = "macos")]
     {
         let panel = app_handle.get_webview_panel("main").unwrap();
@@ -28,12 +47,15 @@ fn hide_panel(app_handle: tauri::AppHandle) {
 }
 
 fn main() {
+    let last_session = Arc::new(Mutex::new(Instant::now()));
+
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![hide_panel])
+        .manage(LastSessionTime(last_session.clone()))
+        .invoke_handler(tauri::generate_handler![hide_panel, resize_panel])
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_nspanel::init())
-        .setup(|app| {
+        .setup(move |app| {
             // Hide from dock — menu bar only
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
@@ -66,10 +88,11 @@ fn main() {
                 })
                 .build(app)?;
 
-            // Start background thread for breathing reminders
+            // Start background thread for smart screen-time reminders
             let app_handle = app.handle().clone();
+            let last_session_for_thread = last_session.clone();
             std::thread::spawn(move || {
-                reminder_loop(app_handle);
+                reminder_loop(app_handle, last_session_for_thread);
             });
 
             Ok(())
@@ -139,6 +162,35 @@ fn toggle_panel(app_handle: &tauri::AppHandle) {
     // Position below the tray icon and reload for a fresh session
     if let Some(window) = app_handle.get_webview_window("main") {
         let _ = window.move_window(Position::TrayBottomCenter);
+
+        // Clamp to screen bounds so the panel doesn't go off-edge
+        if let Ok(pos) = window.outer_position() {
+            if let Ok(monitor) = window.current_monitor() {
+                if let Some(monitor) = monitor {
+                    let screen = monitor.size();
+                    let scale = monitor.scale_factor();
+                    let win_size = window.outer_size().unwrap_or(tauri::Size::Logical(
+                        tauri::LogicalSize { width: 420.0, height: 520.0 },
+                    ).to_physical(scale));
+                    let screen_w = screen.width as i32;
+                    let win_w = win_size.width as i32;
+                    let mut x = pos.x;
+                    let y = pos.y;
+                    // If panel extends past right edge, nudge left
+                    if x + win_w > screen_w {
+                        x = screen_w - win_w - 8;
+                    }
+                    // If panel extends past left edge, nudge right
+                    if x < 0 {
+                        x = 8;
+                    }
+                    let _ = window.set_position(tauri::Position::Physical(
+                        tauri::PhysicalPosition { x, y },
+                    ));
+                }
+            }
+        }
+
         // Reload the webview to get a completely fresh React mount
         let _ = window.eval("window.location.reload()");
     }
@@ -152,26 +204,47 @@ fn toggle_panel(app_handle: &tauri::AppHandle) {
 #[cfg(not(target_os = "macos"))]
 fn toggle_panel(_app_handle: &tauri::AppHandle) {}
 
-/// Sends a notification reminder every 2 hours during work hours (9 AM - 6 PM).
-fn reminder_loop(app: tauri::AppHandle) {
+/// Smart screen-time reminder: notifies after 90 minutes of continuous screen time
+/// during work hours (9 AM - 6 PM). Resets when the user completes a breathing session.
+fn reminder_loop(app: tauri::AppHandle, last_session: Arc<Mutex<Instant>>) {
     use chrono::Local;
     use std::thread::sleep;
     use std::time::Duration;
 
+    const SCREEN_TIME_LIMIT: Duration = Duration::from_secs(90 * 60); // 90 minutes
+    const CHECK_INTERVAL: Duration = Duration::from_secs(60);         // check every minute
+    const WORK_HOUR_START: u32 = 9;
+    const WORK_HOUR_END: u32 = 18;
+
+    let mut notified_for_current_period = false;
+
     loop {
+        sleep(CHECK_INTERVAL);
+
         let now = Local::now();
         let hour = now.hour();
 
-        // Only notify during work hours
-        if (9..18).contains(&hour) {
+        // Only remind during work hours
+        if !(WORK_HOUR_START..WORK_HOUR_END).contains(&hour) {
+            continue;
+        }
+
+        let elapsed = last_session.lock().unwrap().elapsed();
+
+        // If the timer was reset (session completed), clear the notification flag
+        if elapsed < SCREEN_TIME_LIMIT {
+            notified_for_current_period = false;
+            continue;
+        }
+
+        // 90+ minutes elapsed — send one notification per period
+        if !notified_for_current_period {
             let _ = app.notification()
                 .builder()
                 .title("Niyora")
-                .body("Time for a breathing break. Click the menu bar icon to start.")
+                .body("You've been at your screen for 90 minutes. Take a breathing break?")
                 .show();
+            notified_for_current_period = true;
         }
-
-        // Sleep for 2 hours
-        sleep(Duration::from_secs(2 * 60 * 60));
     }
 }

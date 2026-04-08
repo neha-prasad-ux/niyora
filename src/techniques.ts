@@ -33,6 +33,8 @@ export interface BreathingTechnique {
   kind: "breathing";
   name: string;
   subtitle: string;
+  instructions: string;
+  benefits: string;
   phases: BreathPhase[];
   rounds: number;
   visual: VisualConfig;
@@ -50,6 +52,8 @@ export interface MindfulnessTechnique {
   kind: "mindfulness";
   name: string;
   subtitle: string;
+  instructions: string;
+  benefits: string;
   prompts: MindfulPrompt[];
   visual: VisualConfig;
 }
@@ -66,7 +70,9 @@ const breathingTechniques: BreathingTechnique[] = [
   {
     kind: "breathing",
     name: "Box Breathing",
-    subtitle: "Sama Vritti",
+    subtitle: "A Navy SEAL method for calm under pressure",
+    instructions: "Inhale, hold, exhale, hold — each for 4 counts.\nKeep the rhythm even and steady.",
+    benefits: "Let's lower your stress hormones and switch your body into rest mode.",
     phases: [
       { type: "inhale", label: "inhale", duration: 4 },
       { type: "hold",   label: "hold",   duration: 4 },
@@ -86,7 +92,9 @@ const breathingTechniques: BreathingTechnique[] = [
   {
     kind: "breathing",
     name: "Ujjayi",
-    subtitle: "Ocean Breath",
+    subtitle: "Yogic breath that slows the heart rate",
+    instructions: "Breathe in through the nose, exhale slowly\nwith a soft constriction at the back of the throat.",
+    benefits: "Time to slow your heart rate and quiet those overactive brain signals.",
     phases: [
       { type: "inhale", label: "inhale through nose", duration: 4 },
       { type: "exhale", label: "exhale slowly",       duration: 6 },
@@ -104,7 +112,9 @@ const breathingTechniques: BreathingTechnique[] = [
   {
     kind: "breathing",
     name: "Cooling Breath",
-    subtitle: "Sheetali",
+    subtitle: "Pranayama technique to lower body temperature",
+    instructions: "Curl your tongue and inhale through the mouth.\nHold briefly, then exhale through the nose.",
+    benefits: "Let's cool your body down and lower your blood pressure in just a few breaths.",
     phases: [
       { type: "inhale", label: "inhale through mouth", duration: 4 },
       { type: "hold",   label: "hold",                 duration: 2 },
@@ -124,7 +134,9 @@ const breathingTechniques: BreathingTechnique[] = [
   {
     kind: "breathing",
     name: "Alternate Nostril",
-    subtitle: "Nadi Shodhana",
+    subtitle: "Balances the left and right brain hemispheres",
+    instructions: "Close one nostril, inhale. Switch sides, exhale.\nAlternate with each breath cycle.",
+    benefits: "Get ready to bring both sides of your brain into sync.",
     phases: [
       { type: "inhale", label: "inhale left",  duration: 4 },
       { type: "hold",   label: "hold",         duration: 4 },
@@ -146,7 +158,9 @@ const breathingTechniques: BreathingTechnique[] = [
   {
     kind: "breathing",
     name: "Left Nostril",
-    subtitle: "Chandra Bhedana",
+    subtitle: "Activates the body's rest-and-digest response",
+    instructions: "Inhale through the left nostril only.\nExhale through the right.",
+    benefits: "Let's activate your body's built-in calming system and ease you toward rest.",
     phases: [
       { type: "inhale", label: "inhale left",  duration: 4 },
       { type: "hold",   label: "hold",         duration: 2 },
@@ -166,7 +180,9 @@ const breathingTechniques: BreathingTechnique[] = [
   {
     kind: "breathing",
     name: "Diaphragmatic",
-    subtitle: "Belly Breathing",
+    subtitle: "The foundation of clinical breathing therapy",
+    instructions: "Let your belly expand fully on inhale.\nRelease slowly on exhale.",
+    benefits: "Let's strengthen your body's stress resilience and bring down inflammation.",
     phases: [
       { type: "inhale", label: "breathe into belly", duration: 4 },
       { type: "exhale", label: "release slowly",     duration: 6 },
@@ -184,7 +200,9 @@ const breathingTechniques: BreathingTechnique[] = [
   {
     kind: "breathing",
     name: "4-7-8 Breath",
-    subtitle: "Relaxing Breath",
+    subtitle: "A doctor-developed method for falling asleep",
+    instructions: "Inhale for 4 counts, hold for 7, exhale for 8.\nThe long exhale is the key.",
+    benefits: "Get ready to guide your nervous system into deep relaxation.",
     phases: [
       { type: "inhale", label: "inhale",  duration: 4 },
       { type: "hold",   label: "hold",    duration: 7 },
@@ -210,7 +228,9 @@ const mindfulnessTechniques: MindfulnessTechnique[] = [
   {
     kind: "mindfulness",
     name: "Self Compassion",
-    subtitle: "Kristin Neff's MSC",
+    subtitle: "A research-backed way to lower self-criticism",
+    instructions: "Read each phrase slowly.\nLet the words land without judgment.",
+    benefits: "Let's lower your stress hormones and give your mind the warmth it needs.",
     prompts: [
       { text: "this is a moment of difficulty",     duration: 8 },
       { text: "difficulty is part of being human",  duration: 8 },
@@ -228,7 +248,9 @@ const mindfulnessTechniques: MindfulnessTechnique[] = [
   {
     kind: "mindfulness",
     name: "Leaves on a Stream",
-    subtitle: "Cognitive Defusion",
+    subtitle: "A CBT method for detaching from difficult thoughts",
+    instructions: "Notice a thought. Imagine placing it on a leaf\nand watching it drift away downstream.",
+    benefits: "Time to loosen the grip of those thoughts so they stop feeling like facts.",
     prompts: [
       { text: "notice what's on your mind",        duration: 6 },
       { text: "place the thought on a leaf",       duration: 7 },
@@ -248,7 +270,9 @@ const mindfulnessTechniques: MindfulnessTechnique[] = [
   {
     kind: "mindfulness",
     name: "Gratitude",
-    subtitle: "A Moment of Warmth",
+    subtitle: "Shifts brain chemistry toward positive emotion",
+    instructions: "Bring one person to mind.\nFeel the warmth of that connection.",
+    benefits: "Let's boost your feel-good brain chemicals and ease your body.",
     prompts: [
       { text: "think of one person",          duration: 8 },
       { text: "feel that warmth",             duration: 8 },
@@ -267,7 +291,9 @@ const mindfulnessTechniques: MindfulnessTechnique[] = [
   {
     kind: "mindfulness",
     name: "Self Hug",
-    subtitle: "Somatic Comfort",
+    subtitle: "A somatic technique that signals safety to the brain",
+    instructions: "Wrap your arms around yourself gently.\nHold and feel the pressure of your own embrace.",
+    benefits: "Let's tell your brain you're safe and release those calming hormones.",
     prompts: [
       { text: "wrap your arms around yourself",  duration: 6 },
       { text: "hold gently",                     duration: 8 },
@@ -286,7 +312,9 @@ const mindfulnessTechniques: MindfulnessTechnique[] = [
   {
     kind: "mindfulness",
     name: "Positive Affirmation",
-    subtitle: "Words of Strength",
+    subtitle: "Rewires self-perception through repetition",
+    instructions: "Read each affirmation silently.\nRepeat it to yourself and let it settle.",
+    benefits: "Time to rewire how your brain talks to you about yourself.",
     prompts: [
       { text: "I am enough",                   duration: 7 },
       { text: "I am doing my best",            duration: 7 },
@@ -306,7 +334,9 @@ const mindfulnessTechniques: MindfulnessTechnique[] = [
   {
     kind: "mindfulness",
     name: "5-4-3-2-1",
-    subtitle: "Grounding",
+    subtitle: "A clinical grounding technique for anxiety",
+    instructions: "Notice 5 things you see, 4 you touch, 3 you hear,\n2 you smell, and 1 you taste.",
+    benefits: "Let's pull your attention out of those spiraling thoughts and back into your body.",
     prompts: [
       { text: "5 things you can see",    duration: 7 },
       { text: "4 things you can touch",  duration: 7 },
@@ -326,7 +356,9 @@ const mindfulnessTechniques: MindfulnessTechnique[] = [
   {
     kind: "mindfulness",
     name: "Trataka",
-    subtitle: "Steady Gaze",
+    subtitle: "A yogic practice for training sustained focus",
+    instructions: "Soften your gaze on the centre point.\nLet your peripheral vision blur naturally.",
+    benefits: "Let's increase your calm brainwave activity and relieve that eye-strain tension.",
     prompts: [
       { text: "soften your gaze",              duration: 5 },
       { text: "rest your eyes on the centre",  duration: 10 },
