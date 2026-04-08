@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback } from "react";
+import { useRef, useEffect, useCallback, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   randomTechnique,
@@ -8,8 +8,13 @@ import {
 } from "./techniques";
 
 // --- Config ---
-const WIDTH = 300;
-const HEIGHT = 380;
+const SM_WIDTH = 300;
+const SM_HEIGHT = 380;
+const LG_WIDTH = 420;
+const LG_HEIGHT = 520;
+// Used by motion functions outside the component — always reference small size as base
+let WIDTH = SM_WIDTH;
+let HEIGHT = SM_HEIGHT;
 const PARTICLE_COUNT = 70;
 const INTRO_DURATION = 3;
 
@@ -50,17 +55,17 @@ interface Particle {
   side: number;
 }
 
-function createParticle(): Particle {
+function createParticle(w: number, h: number): Particle {
   const angle = Math.random() * Math.PI * 2;
   const dist = 30 + Math.random() * 120;
-  const x = WIDTH / 2 + Math.cos(angle) * dist;
-  const y = HEIGHT / 2 + Math.sin(angle) * dist;
+  const x = w / 2 + Math.cos(angle) * dist;
+  const y = h / 2 + Math.sin(angle) * dist;
   return {
     x, y, vx: 0, vy: 0,
     baseSize: 1.5 + Math.random() * 1.5, size: 1.5 + Math.random() * 1.5,
     opacity: 0.3 + Math.random() * 0.4,
     noiseOffsetX: Math.random() * 1000, noiseOffsetY: Math.random() * 1000,
-    homeX: x, homeY: y, side: x < WIDTH / 2 ? -1 : 1,
+    homeX: x, homeY: y, side: x < w / 2 ? -1 : 1,
   };
 }
 
@@ -321,6 +326,7 @@ interface AnimState {
   noise: ReturnType<typeof createNoise>;
   technique: Technique;
   time: number;
+  waiting: boolean; // true = pre-session info screen, particles drift but no intro
   introTime: number; introDone: boolean;
   // Breathing state
   phaseIndex: number; phaseTime: number; round: number;
@@ -334,19 +340,85 @@ interface AnimState {
   labelOpacity: number; nameOpacity: number; subtitleOpacity: number;
 }
 
-function createState(): AnimState {
+function createState(w: number, h: number): AnimState {
   return {
-    particles: Array.from({ length: PARTICLE_COUNT }, createParticle),
+    particles: Array.from({ length: PARTICLE_COUNT }, () => createParticle(w, h)),
     noise: createNoise(),
     technique: randomTechnique(),
-    time: 0, introTime: 0, introDone: false,
+    time: 0, waiting: true, introTime: 0, introDone: false,
     phaseIndex: 0, phaseTime: 0, round: 0,
     promptIndex: 0, promptTime: 0, promptOpacity: 0,
-    leafX: WIDTH * 0.35, leafY: HEIGHT * 0.5, leafOpacity: 0, leafVisible: false,
+    leafX: w * 0.35, leafY: h * 0.5, leafOpacity: 0, leafVisible: false,
     done: false, doneTime: 0,
     bgColor: [260, 15, 11], targetBgColor: [260, 15, 11],
     labelOpacity: 0, nameOpacity: 0, subtitleOpacity: 0,
   };
+}
+
+// =====================================================================
+// AUDIO
+// =====================================================================
+const AMBIENT_TRACKS = ["/audio/serene.mp3", "/audio/ocean.mp3", "/audio/forest.wav"];
+
+// =====================================================================
+// BUTTON PARTICLES
+// =====================================================================
+interface BtnParticle {
+  id: number;
+  x: number; y: number;
+  vx: number; vy: number;
+  size: number;
+  opacity: number;
+  hue: number;
+}
+
+function useButtonParticles() {
+  const [particles, setParticles] = useState<BtnParticle[]>([]);
+  const idRef = useRef(0);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const startEmitting = useCallback(() => {
+    if (intervalRef.current) return;
+    intervalRef.current = setInterval(() => {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 1.5 + Math.random() * 2.5;
+      const p: BtnParticle = {
+        id: idRef.current++,
+        x: 0, y: 0,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        size: 3 + Math.random() * 4,
+        opacity: 0.6 + Math.random() * 0.3,
+        hue: 260 + Math.random() * 40,
+      };
+      setParticles(prev => [...prev.slice(-20), p]);
+    }, 60);
+  }, []);
+
+  const stopEmitting = useCallback(() => {
+    if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
+  }, []);
+
+  // Animate particles outward + fade
+  useEffect(() => {
+    if (particles.length === 0) return;
+    const frame = requestAnimationFrame(() => {
+      setParticles(prev => prev
+        .map(p => ({
+          ...p,
+          x: p.x + p.vx,
+          y: p.y + p.vy,
+          vx: p.vx * 0.97,
+          vy: p.vy * 0.97,
+          opacity: p.opacity - 0.02,
+        }))
+        .filter(p => p.opacity > 0)
+      );
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [particles]);
+
+  return { particles, startEmitting, stopEmitting };
 }
 
 // =====================================================================
@@ -355,11 +427,94 @@ function createState(): AnimState {
 interface Props { onComplete: () => void; }
 
 export default function BreathingSession({ onComplete }: Props) {
+  const [expanded, setExpanded] = useState(true);
+  // Update module-level vars so motion functions pick up the size
+  WIDTH = expanded ? LG_WIDTH : SM_WIDTH;
+  HEIGHT = expanded ? LG_HEIGHT : SM_HEIGHT;
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const stateRef = useRef<AnimState>(createState());
+  const stateRef = useRef<AnimState>(createState(LG_WIDTH, LG_HEIGHT));
   const rafRef = useRef<number>(0);
+  const sizeRef = useRef({ w: LG_WIDTH, h: LG_HEIGHT });
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [muted, setMuted] = useState(false);
+  const [waiting, setWaiting] = useState(true);
+  const [transitioning, setTransitioning] = useState(false);
+  const btnParticles = useButtonParticles();
 
-  const handleDone = useCallback(async () => { await invoke("hide_panel"); }, []);
+  const handleBegin = useCallback(() => {
+    btnParticles.stopEmitting();
+    setTransitioning(true);
+    // After animation completes, start the session
+    setTimeout(() => {
+      stateRef.current.waiting = false;
+      setWaiting(false);
+      setTransitioning(false);
+    }, 1300);
+  }, []);
+
+  const toggleMute = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (audio.muted) { audio.muted = false; setMuted(false); }
+    else { audio.muted = true; setMuted(true); }
+  }, []);
+
+  const handleDone = useCallback(async () => {
+    // Fade out audio before closing
+    const audio = audioRef.current;
+    if (audio) {
+      let v = audio.volume;
+      const fade = setInterval(() => {
+        v = Math.max(v - 0.05, 0);
+        audio.volume = v;
+        if (v <= 0) { clearInterval(fade); audio.pause(); audio.currentTime = 0; }
+      }, 30);
+    }
+    await invoke("hide_panel");
+  }, []);
+
+  // Background audio — fade in on mount, fade out on done
+  useEffect(() => {
+    const track = AMBIENT_TRACKS[Math.floor(Math.random() * AMBIENT_TRACKS.length)];
+    const audio = new Audio(track);
+    audio.loop = true;
+    audio.volume = 0;
+    audioRef.current = audio;
+    audio.play().catch(() => {}); // autoplay may be blocked
+
+    // Fade in over 2s
+    let vol = 0;
+    const fadeIn = setInterval(() => {
+      vol = Math.min(vol + 0.02, 0.35);
+      audio.volume = vol;
+      if (vol >= 0.35) clearInterval(fadeIn);
+    }, 80);
+
+    return () => {
+      clearInterval(fadeIn);
+      // Fade out over 1.5s
+      let v = audio.volume;
+      const fadeOut = setInterval(() => {
+        v = Math.max(v - 0.03, 0);
+        audio.volume = v;
+        if (v <= 0) { clearInterval(fadeOut); audio.pause(); }
+      }, 50);
+    };
+  }, []);
+
+  const toggleExpand = useCallback(async () => {
+    const next = !expanded;
+    const w = next ? LG_WIDTH : SM_WIDTH;
+    const h = next ? LG_HEIGHT : SM_HEIGHT;
+    try {
+      await invoke("resize_panel", { width: w, height: h });
+    } catch { /* dev mode fallback */ }
+    setExpanded(next);
+  }, [expanded]);
+
+  useEffect(() => {
+    sizeRef.current = { w: WIDTH, h: HEIGHT };
+  }, [WIDTH, HEIGHT]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -369,15 +524,34 @@ export default function BreathingSession({ onComplete }: Props) {
     canvas.width = WIDTH * dpr; canvas.height = HEIGHT * dpr;
     ctx.scale(dpr, dpr);
 
+    // Reinitialize particles for new size, but keep the same technique + progress
+    const prev = stateRef.current;
+    const fresh = createState(WIDTH, HEIGHT);
+    fresh.technique = prev.technique;
+    fresh.waiting = prev.waiting;
+    fresh.introDone = prev.introDone;
+    fresh.introTime = prev.introTime;
+    fresh.phaseIndex = prev.phaseIndex;
+    fresh.phaseTime = prev.phaseTime;
+    fresh.round = prev.round;
+    fresh.promptIndex = prev.promptIndex;
+    fresh.promptTime = prev.promptTime;
+    fresh.done = prev.done;
+    fresh.doneTime = prev.doneTime;
+    fresh.bgColor = prev.bgColor;
+    fresh.targetBgColor = prev.targetBgColor;
+    stateRef.current = fresh;
+
     let lastTime = performance.now();
 
     function tick(now: number) {
+      const { w: WIDTH, h: HEIGHT } = sizeRef.current;
       const rawDt = (now - lastTime) / 1000;
       lastTime = now;
 
       // If more than 0.5s passed, the panel was hidden and just reopened — reset
       if (rawDt > 0.5) {
-        stateRef.current = createState();
+        stateRef.current = createState(WIDTH, HEIGHT);
       }
 
       const dt = Math.min(rawDt, 0.05);
@@ -389,8 +563,14 @@ export default function BreathingSession({ onComplete }: Props) {
       const cx = WIDTH / 2, cy = HEIGHT / 2;
       const isMindful = technique.kind === "mindfulness";
 
+      // ── WAITING (pre-session info screen) ──
+      // Particles drift but nothing else progresses
+      if (s.waiting) {
+        s.targetBgColor = [260, 15, 11];
+      }
+
       // ── INTRO ──
-      if (!s.introDone) {
+      if (!s.waiting && !s.introDone) {
         s.introTime += dt;
         if (s.introTime < 1) { s.nameOpacity = lerpVal(s.nameOpacity, 0.9, dt * 4); s.subtitleOpacity = lerpVal(s.subtitleOpacity, 0.55, dt * 3); }
         else if (s.introTime < 2) { s.nameOpacity = 0.9; s.subtitleOpacity = 0.55; }
@@ -459,6 +639,12 @@ export default function BreathingSession({ onComplete }: Props) {
         s.doneTime += dt;
         if (s.doneTime < 1.5) s.targetBgColor = [35, 30, 14];
         else s.targetBgColor = [30, 15, 10];
+        // Fade audio out during "well done" screen
+        const audio = audioRef.current;
+        if (audio && !audio.muted && audio.volume > 0) {
+          audio.volume = Math.max(0, audio.volume - dt * 0.15);
+          if (audio.volume <= 0) { audio.pause(); audio.currentTime = 0; }
+        }
         if (s.doneTime > 7) { onComplete(); return; }
       }
 
@@ -633,26 +819,26 @@ export default function BreathingSession({ onComplete }: Props) {
         const glowOpacity = s.done ? lerpVal(0.5, 0, Math.min(s.doneTime / 3, 1)) : pulse;
 
         // Outer halo (large, soft)
-        const grad3 = ctx.createRadialGradient(focusX, focusY, 0, focusX, focusY, 50);
-        grad3.addColorStop(0, `hsla(40, 50%, 55%, ${glowOpacity * 0.08})`);
+        const grad3 = ctx.createRadialGradient(focusX, focusY, 0, focusX, focusY, 80);
+        grad3.addColorStop(0, `hsla(40, 50%, 55%, ${glowOpacity * 0.1})`);
         grad3.addColorStop(1, `hsla(40, 50%, 55%, 0)`);
-        ctx.fillStyle = grad3; ctx.fillRect(focusX - 50, focusY - 50, 100, 100);
+        ctx.fillStyle = grad3; ctx.fillRect(focusX - 80, focusY - 80, 160, 160);
 
         // Middle glow
-        const grad2 = ctx.createRadialGradient(focusX, focusY, 0, focusX, focusY, 22);
-        grad2.addColorStop(0, `hsla(38, 55%, 60%, ${glowOpacity * 0.25})`);
+        const grad2 = ctx.createRadialGradient(focusX, focusY, 0, focusX, focusY, 36);
+        grad2.addColorStop(0, `hsla(38, 55%, 60%, ${glowOpacity * 0.3})`);
         grad2.addColorStop(1, `hsla(38, 55%, 60%, 0)`);
-        ctx.fillStyle = grad2; ctx.fillRect(focusX - 22, focusY - 22, 44, 44);
+        ctx.fillStyle = grad2; ctx.fillRect(focusX - 36, focusY - 36, 72, 72);
 
         // Core dot — warm golden, steady
         ctx.beginPath();
-        ctx.arc(focusX, focusY, 4 + pulse * 1.5, 0, Math.PI * 2);
+        ctx.arc(focusX, focusY, 8 + pulse * 3, 0, Math.PI * 2);
         ctx.fillStyle = `hsla(38, 60%, 65%, ${glowOpacity * 0.9})`;
         ctx.fill();
 
         // Inner bright point
         ctx.beginPath();
-        ctx.arc(focusX, focusY, 1.5, 0, Math.PI * 2);
+        ctx.arc(focusX, focusY, 3, 0, Math.PI * 2);
         ctx.fillStyle = `hsla(40, 40%, 85%, ${glowOpacity * 0.8})`;
         ctx.fill();
       }
@@ -690,10 +876,10 @@ export default function BreathingSession({ onComplete }: Props) {
       ctx.letterSpacing = "1.5px";
 
       if (!s.introDone) {
-        ctx.font = "300 22px 'Source Serif 4', Georgia, serif";
+        ctx.font = "300 22px 'Poppins', sans-serif";
         ctx.fillStyle = `rgba(255, 255, 255, ${s.nameOpacity})`;
         ctx.fillText(technique.name, cx, HEIGHT * 0.68);
-        ctx.font = "300 13px 'Source Serif 4', Georgia, serif";
+        ctx.font = "300 13px 'Poppins', sans-serif";
         ctx.fillStyle = `rgba(255, 255, 255, ${s.subtitleOpacity})`;
         ctx.fillText(technique.subtitle, cx, HEIGHT * 0.68 + 24);
       } else if (s.done) {
@@ -701,19 +887,19 @@ export default function BreathingSession({ onComplete }: Props) {
         const targetOp = doneT > 1.0 ? 0.85 : 0;
         s.labelOpacity = lerpVal(s.labelOpacity, targetOp, dt * 2.5);
         if (doneT > 5.5) s.labelOpacity = lerpVal(s.labelOpacity, 0, dt * 3);
-        ctx.font = "200 20px 'Source Serif 4', Georgia, serif";
+        ctx.font = "300 20px 'Poppins', sans-serif";
         ctx.fillStyle = `rgba(255, 245, 230, ${s.labelOpacity})`;
         ctx.fillText("well done", cx, HEIGHT * 0.70);
         if (doneT > 1.8) {
           const subOp = Math.min((doneT - 1.8) * 0.8, 0.3);
           const subFinal = doneT > 5.5 ? lerpVal(subOp, 0, (doneT - 5.5) * 2) : subOp;
-          ctx.font = "300 12px 'Source Serif 4', Georgia, serif";
+          ctx.font = "300 12px 'Poppins', sans-serif";
           ctx.fillStyle = `rgba(255, 245, 230, ${Math.max(0, subFinal)})`;
           ctx.fillText("take this calm with you", cx, HEIGHT * 0.70 + 24);
         }
       } else if (isMindful) {
         // Mindfulness prompt text — lower third, wrapped, gentle
-        ctx.font = "300 17px 'Source Serif 4', Georgia, serif";
+        ctx.font = "500 17px 'Poppins', sans-serif";
         ctx.fillStyle = `rgba(255, 250, 240, ${s.promptOpacity})`;
         const lines = wrapText(ctx, currentPromptText, WIDTH - 60);
         const lineHeight = 24;
@@ -723,7 +909,7 @@ export default function BreathingSession({ onComplete }: Props) {
       } else {
         // Breathing instruction
         s.labelOpacity = lerpVal(s.labelOpacity, 0.9, dt * 3);
-        ctx.font = "300 15px 'Source Serif 4', Georgia, serif";
+        ctx.font = "500 15px 'Poppins', sans-serif";
         ctx.fillStyle = `rgba(255, 255, 255, ${s.labelOpacity})`;
         ctx.fillText(currentLabel, cx, HEIGHT * 0.72);
       }
@@ -754,15 +940,184 @@ export default function BreathingSession({ onComplete }: Props) {
         }
       }
 
+      // ── PROGRESS BORDER ──
+      if (s.introDone && !s.done) {
+        let progress = 0;
+        if (!isMindful) {
+          const bt = technique as BreathingTechnique;
+          const totalPhases = bt.rounds * bt.phases.length;
+          const completedPhases = s.round * bt.phases.length + s.phaseIndex;
+          const currentPhaseProgress = bt.phases[s.phaseIndex] ? phaseT : 0;
+          progress = (completedPhases + currentPhaseProgress) / totalPhases;
+        } else {
+          const mt = technique as MindfulnessTechnique;
+          const currentPromptProgress = mt.prompts[s.promptIndex]
+            ? s.promptTime / mt.prompts[s.promptIndex].duration : 0;
+          progress = (s.promptIndex + currentPromptProgress) / mt.prompts.length;
+        }
+        progress = Math.max(0, Math.min(progress, 1));
+
+        // Draw rounded-rect border path, then stroke partial progress
+        const r = 16, inset = 1.5, lw = 2;
+        const x0 = inset, y0 = inset, w = WIDTH - inset * 2, bh = HEIGHT - inset * 2;
+        // Total perimeter of rounded rect
+        const straight = 2 * (w - 2 * r) + 2 * (bh - 2 * r);
+        const curved = 2 * Math.PI * r;
+        const totalLen = straight + curved;
+        const progressLen = progress * totalLen;
+
+        ctx.save();
+        ctx.lineWidth = lw;
+        ctx.strokeStyle = `hsla(${h + 30}, ${Math.min(sat + 40, 80)}%, ${Math.min(l + 35, 70)}%, 0.5)`;
+        ctx.lineCap = "round";
+        ctx.setLineDash([progressLen, totalLen]);
+        ctx.beginPath();
+        // Start from top-center, go clockwise
+        ctx.moveTo(x0 + r, y0);
+        ctx.lineTo(x0 + w - r, y0);
+        ctx.arcTo(x0 + w, y0, x0 + w, y0 + r, r);
+        ctx.lineTo(x0 + w, y0 + bh - r);
+        ctx.arcTo(x0 + w, y0 + bh, x0 + w - r, y0 + bh, r);
+        ctx.lineTo(x0 + r, y0 + bh);
+        ctx.arcTo(x0, y0 + bh, x0, y0 + bh - r, r);
+        ctx.lineTo(x0, y0 + r);
+        ctx.arcTo(x0, y0, x0 + r, y0, r);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
+
       rafRef.current = requestAnimationFrame(tick);
     }
     rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [onComplete]);
+  }, [onComplete, WIDTH, HEIGHT]);
 
   return (
     <div style={{ width: WIDTH, height: HEIGHT, borderRadius: 16, overflow: "hidden", position: "relative", cursor: "default", userSelect: "none" }}>
       <canvas ref={canvasRef} style={{ width: WIDTH, height: HEIGHT, display: "block" }} />
+      {/* Pre-session info screen */}
+      {waiting && (
+        <div style={{
+          position: "absolute", inset: 0, zIndex: 5,
+          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+          fontFamily: "'Poppins', sans-serif",
+          color: "rgba(255, 255, 255, 0.85)",
+        }}>
+          {/* Frosted blur backdrop */}
+          <div
+            className={transitioning ? "info-exit-backdrop" : ""}
+            style={{
+              position: "absolute", inset: 0,
+              background: "rgba(10, 8, 20, 0.6)",
+              backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
+              borderRadius: 16,
+            }}
+          />
+          {/* Content */}
+          <div
+            className={transitioning ? "info-exit-content" : ""}
+            style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", alignItems: "center", padding: "0 36px", textAlign: "center" }}
+          >
+            {/* Logo */}
+            <img
+              className="info-fade-1"
+              src="/icons/niyora-logo.png"
+              alt="Niyora"
+              style={{ width: 36, height: 36, marginBottom: 8, opacity: 0.8 }}
+              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+            />
+            {/* Brand name */}
+            <div className="info-fade-1" style={{ fontSize: 13, fontWeight: 500, letterSpacing: "3px", textTransform: "uppercase", color: "rgba(255, 255, 255, 0.5)", marginBottom: 4 }}>
+              Niyora
+            </div>
+            {/* Tagline */}
+            <div className="info-fade-2" style={{ fontSize: 11, fontWeight: 300, color: "rgba(255, 255, 255, 0.3)", marginBottom: 40 }}>
+              Calm in 60 seconds
+            </div>
+            {/* Benefit — hero text */}
+            <div className="info-fade-3" style={{ fontSize: 17, fontWeight: 400, lineHeight: 1.7, color: "rgba(255, 255, 255, 0.75)", marginBottom: 40, maxWidth: 320 }}>
+              {stateRef.current.technique.benefits}
+            </div>
+            {/* Begin button */}
+            <div style={{ position: "relative" }}
+              onMouseEnter={btnParticles.startEmitting}
+              onMouseLeave={btnParticles.stopEmitting}
+            >
+              {/* Hover particles */}
+              {btnParticles.particles.map(p => (
+                <div key={p.id} style={{
+                  position: "absolute",
+                  left: "50%", top: "50%",
+                  width: p.size, height: p.size,
+                  borderRadius: "50%",
+                  transform: `translate(${p.x - p.size / 2}px, ${p.y - p.size / 2}px)`,
+                  background: `radial-gradient(circle, hsla(${p.hue}, 70%, 65%, ${p.opacity}) 0%, hsla(${p.hue}, 60%, 50%, ${p.opacity * 0.4}) 60%, transparent 100%)`,
+                  boxShadow: `0 0 ${p.size * 2}px hsla(${p.hue}, 70%, 55%, ${p.opacity * 0.4})`,
+                  pointerEvents: "none",
+                  zIndex: 0,
+                }} />
+              ))}
+              <button className="info-fade-4" onClick={handleBegin} disabled={transitioning} style={{
+                padding: "12px 48px", borderRadius: 28, position: "relative", zIndex: 1,
+                background: "linear-gradient(135deg, hsla(270, 50%, 45%, 0.8), hsla(280, 40%, 35%, 0.8))",
+                border: "1px solid hsla(270, 40%, 55%, 0.3)",
+                color: transitioning ? "transparent" : "rgba(255, 255, 255, 0.9)",
+                fontSize: 15, fontWeight: 500, fontFamily: "'Poppins', sans-serif",
+                cursor: transitioning ? "default" : "pointer", letterSpacing: "2px", transition: "all 0.3s ease", outline: "none",
+                boxShadow: "0 4px 20px hsla(270, 50%, 40%, 0.3), inset 0 1px 0 hsla(270, 60%, 70%, 0.15)",
+              }}
+                onMouseEnter={(e) => { if (!transitioning) { e.currentTarget.style.background = "linear-gradient(135deg, hsla(270, 55%, 50%, 0.9), hsla(280, 45%, 40%, 0.9))"; e.currentTarget.style.boxShadow = "0 6px 28px hsla(270, 50%, 40%, 0.45), inset 0 1px 0 hsla(270, 60%, 70%, 0.2)"; }}}
+                onMouseLeave={(e) => { if (!transitioning) { e.currentTarget.style.background = "linear-gradient(135deg, hsla(270, 50%, 45%, 0.8), hsla(280, 40%, 35%, 0.8))"; e.currentTarget.style.boxShadow = "0 4px 20px hsla(270, 50%, 40%, 0.3), inset 0 1px 0 hsla(270, 60%, 70%, 0.15)"; }}}
+              >
+                Begin
+              </button>
+              {/* Expanding orb on click */}
+              {transitioning && (
+                <div className="begin-orb" style={{
+                  left: "50%", top: "50%",
+                  marginLeft: -24, marginTop: -24,
+                  zIndex: 2,
+                }} />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Top-left: Expand/collapse */}
+      <button onClick={toggleExpand} title={expanded ? "Collapse" : "Expand"} style={{
+        position: "absolute", top: 8, left: 8, width: 26, height: 26,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        background: "transparent", border: "none", color: "rgba(255,255,255,0.2)",
+        cursor: "pointer", borderRadius: 6, zIndex: 10, transition: "all 0.2s ease", outline: "none",
+      }}
+        onMouseEnter={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.5)"; e.currentTarget.style.background = "rgba(255,255,255,0.08)"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.2)"; e.currentTarget.style.background = "transparent"; }}
+      >
+        {expanded ? (
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M4 1v3H1M8 11V8h3M4 4L1 1M8 8l3 3" /></svg>
+        ) : (
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M8 1v3h3M4 11V8H1M8 4l3-3M4 8L1 11" /></svg>
+        )}
+      </button>
+      {/* Top-center: Mute/unmute */}
+      <button onClick={toggleMute} title={muted ? "Unmute" : "Mute"} style={{
+        position: "absolute", top: 8, left: "50%", transform: "translateX(-50%)", width: 26, height: 26,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        background: "transparent", border: "none", color: "rgba(255,255,255,0.2)",
+        cursor: "pointer", borderRadius: 6, zIndex: 10, transition: "all 0.2s ease", outline: "none",
+      }}
+        onMouseEnter={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.5)"; e.currentTarget.style.background = "rgba(255,255,255,0.08)"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.2)"; e.currentTarget.style.background = "transparent"; }}
+      >
+        {muted ? (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5z" /><line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" /></svg>
+        ) : (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5z" /><path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07" /></svg>
+        )}
+      </button>
+      {/* Top-right: Close */}
       <button onClick={handleDone} title="Close" style={{
         position: "absolute", top: 8, right: 8, width: 26, height: 26,
         display: "flex", alignItems: "center", justifyContent: "center",
