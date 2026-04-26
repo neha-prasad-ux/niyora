@@ -4,7 +4,13 @@
  * Two types share the same particle renderer:
  * - "breathing": timer-driven phases, particle motion follows breath
  * - "mindfulness": text-driven prompts, particles set the ambient mood
+ *
+ * Each technique declares an `unlockTier` — the My Soul tier that unlocks it.
+ * Spark-tier techniques are available from day one; harder techniques unlock
+ * progressively as the user practices.
  */
+
+import type { Tier } from "./tiers";
 
 // ── Shared visual config ──
 
@@ -38,6 +44,7 @@ export interface BreathingTechnique {
   phases: BreathPhase[];
   rounds: number;
   visual: VisualConfig;
+  unlockTier: Tier["id"];
 }
 
 // ── Mindfulness moments ──
@@ -56,6 +63,7 @@ export interface MindfulnessTechnique {
   benefits: string;
   prompts: MindfulPrompt[];
   visual: VisualConfig;
+  unlockTier: Tier["id"];
 }
 
 // ── Union type ──
@@ -69,9 +77,10 @@ export type Technique = BreathingTechnique | MindfulnessTechnique;
 const breathingTechniques: BreathingTechnique[] = [
   {
     kind: "breathing",
-    name: "Box Breathing",
-    subtitle: "A Navy SEAL method for calm under pressure",
-    instructions: "Inhale, hold, exhale, hold — each for 4 counts.\nKeep the rhythm even and steady.",
+    name: "Box Breath",
+    subtitle: "calms under pressure · 65s",
+    unlockTier: "spark",
+    instructions: "In 4, hold 4, out 4, hold 4. Steady rhythm.",
     benefits: "Let's lower your stress hormones and switch your body into rest mode.",
     phases: [
       { type: "inhale", label: "inhale", duration: 4 },
@@ -91,9 +100,10 @@ const breathingTechniques: BreathingTechnique[] = [
   },
   {
     kind: "breathing",
-    name: "Ujjayi",
-    subtitle: "Yogic breath that slows the heart rate",
-    instructions: "Breathe in through the nose, exhale slowly\nwith a soft constriction at the back of the throat.",
+    name: "Ocean Breath",
+    subtitle: "slows heart rate · 60s",
+    unlockTier: "radiance",
+    instructions: "Soft 'haaa' sound at the back of your throat. Breathe through nose.",
     benefits: "Time to slow your heart rate and quiet those overactive brain signals.",
     phases: [
       { type: "inhale", label: "inhale through nose", duration: 4 },
@@ -112,8 +122,9 @@ const breathingTechniques: BreathingTechnique[] = [
   {
     kind: "breathing",
     name: "Cooling Breath",
-    subtitle: "Pranayama technique to lower body temperature",
-    instructions: "Curl your tongue and inhale through the mouth.\nHold briefly, then exhale through the nose.",
+    subtitle: "lowers body heat · 60s",
+    unlockTier: "glow",
+    instructions: "Curl your tongue. Inhale through it, exhale through nose.",
     benefits: "Let's cool your body down and lower your blood pressure in just a few breaths.",
     phases: [
       { type: "inhale", label: "inhale through mouth", duration: 4 },
@@ -134,8 +145,9 @@ const breathingTechniques: BreathingTechnique[] = [
   {
     kind: "breathing",
     name: "Alternate Nostril",
-    subtitle: "Balances the left and right brain hemispheres",
-    instructions: "Close one nostril, inhale. Switch sides, exhale.\nAlternate with each breath cycle.",
+    subtitle: "reset between tasks · 75s",
+    unlockTier: "radiance",
+    instructions: "Inhale left, exhale right. Then inhale right, exhale left.",
     benefits: "Get ready to bring both sides of your brain into sync.",
     phases: [
       { type: "inhale", label: "inhale left",  duration: 4 },
@@ -158,8 +170,9 @@ const breathingTechniques: BreathingTechnique[] = [
   {
     kind: "breathing",
     name: "Left Nostril",
-    subtitle: "Activates the body's rest-and-digest response",
-    instructions: "Inhale through the left nostril only.\nExhale through the right.",
+    subtitle: "switches into rest · 60s",
+    unlockTier: "shine",
+    instructions: "Press right nostril closed. Breathe in and out through the left.",
     benefits: "Let's activate your body's built-in calming system and ease you toward rest.",
     phases: [
       { type: "inhale", label: "inhale left",  duration: 4 },
@@ -179,9 +192,10 @@ const breathingTechniques: BreathingTechnique[] = [
   },
   {
     kind: "breathing",
-    name: "Diaphragmatic",
-    subtitle: "The foundation of clinical breathing therapy",
-    instructions: "Let your belly expand fully on inhale.\nRelease slowly on exhale.",
+    name: "Belly Breath",
+    subtitle: "eases the body · 60s",
+    unlockTier: "spark",
+    instructions: "Let your belly rise on the in-breath, soften on the out.",
     benefits: "Let's strengthen your body's stress resilience and bring down inflammation.",
     phases: [
       { type: "inhale", label: "breathe into belly", duration: 4 },
@@ -199,9 +213,10 @@ const breathingTechniques: BreathingTechnique[] = [
   },
   {
     kind: "breathing",
-    name: "4-7-8 Breath",
-    subtitle: "A doctor-developed method for falling asleep",
-    instructions: "Inhale for 4 counts, hold for 7, exhale for 8.\nThe long exhale is the key.",
+    name: "Wind Down",
+    subtitle: "deep relaxation · 75s",
+    unlockTier: "spark",
+    instructions: "Inhale 4, hold 7, exhale 8. The long exhale is the key.",
     benefits: "Get ready to guide your nervous system into deep relaxation.",
     phases: [
       { type: "inhale", label: "inhale",  duration: 4 },
@@ -227,9 +242,10 @@ const breathingTechniques: BreathingTechnique[] = [
 const mindfulnessTechniques: MindfulnessTechnique[] = [
   {
     kind: "mindfulness",
-    name: "Self Compassion",
-    subtitle: "A research-backed way to lower self-criticism",
-    instructions: "Read each phrase slowly.\nLet the words land without judgment.",
+    name: "Be Kind to Yourself",
+    subtitle: "softens self-criticism · 25s",
+    unlockTier: "spark",
+    instructions: "Read each phrase slowly. Let it land.",
     benefits: "Let's lower your stress hormones and give your mind the warmth it needs.",
     prompts: [
       { text: "this is a moment of difficulty",     duration: 8 },
@@ -247,9 +263,10 @@ const mindfulnessTechniques: MindfulnessTechnique[] = [
   },
   {
     kind: "mindfulness",
-    name: "Leaves on a Stream",
-    subtitle: "A CBT method for detaching from difficult thoughts",
-    instructions: "Notice a thought. Imagine placing it on a leaf\nand watching it drift away downstream.",
+    name: "Let It Drift",
+    subtitle: "loosens stuck thoughts · 35s",
+    unlockTier: "shine",
+    instructions: "Notice a thought. Place it on a leaf. Watch it float away.",
     benefits: "Time to loosen the grip of those thoughts so they stop feeling like facts.",
     prompts: [
       { text: "notice what's on your mind",        duration: 6 },
@@ -269,9 +286,10 @@ const mindfulnessTechniques: MindfulnessTechnique[] = [
   },
   {
     kind: "mindfulness",
-    name: "Gratitude",
-    subtitle: "Shifts brain chemistry toward positive emotion",
-    instructions: "Bring one person to mind.\nFeel the warmth of that connection.",
+    name: "Bring Someone to Mind",
+    subtitle: "warms the mood · 25s",
+    unlockTier: "spark",
+    instructions: "Picture one person who matters. Feel the warmth.",
     benefits: "Let's boost your feel-good brain chemicals and ease your body.",
     prompts: [
       { text: "think of one person",          duration: 8 },
@@ -290,9 +308,10 @@ const mindfulnessTechniques: MindfulnessTechnique[] = [
   },
   {
     kind: "mindfulness",
-    name: "Self Hug",
-    subtitle: "A somatic technique that signals safety to the brain",
-    instructions: "Wrap your arms around yourself gently.\nHold and feel the pressure of your own embrace.",
+    name: "Hold Yourself",
+    subtitle: "signals safety · 30s",
+    unlockTier: "spark",
+    instructions: "Wrap your arms around yourself. Hold gently.",
     benefits: "Let's tell your brain you're safe and release those calming hormones.",
     prompts: [
       { text: "wrap your arms around yourself",  duration: 6 },
@@ -311,9 +330,10 @@ const mindfulnessTechniques: MindfulnessTechnique[] = [
   },
   {
     kind: "mindfulness",
-    name: "Positive Affirmation",
-    subtitle: "Rewires self-perception through repetition",
-    instructions: "Read each affirmation silently.\nRepeat it to yourself and let it settle.",
+    name: "Kind Words",
+    subtitle: "quiets the inner critic · 30s",
+    unlockTier: "spark",
+    instructions: "Read each line silently. Repeat it to yourself.",
     benefits: "Time to rewire how your brain talks to you about yourself.",
     prompts: [
       { text: "I am enough",                   duration: 7 },
@@ -333,9 +353,10 @@ const mindfulnessTechniques: MindfulnessTechnique[] = [
   },
   {
     kind: "mindfulness",
-    name: "5-4-3-2-1",
-    subtitle: "A clinical grounding technique for anxiety",
-    instructions: "Notice 5 things you see, 4 you touch, 3 you hear,\n2 you smell, and 1 you taste.",
+    name: "Five Senses",
+    subtitle: "grounds you in the body · 35s",
+    unlockTier: "spark",
+    instructions: "Notice 5 you see, 4 you touch, 3 you hear, 2 you smell, 1 you taste.",
     benefits: "Let's pull your attention out of those spiraling thoughts and back into your body.",
     prompts: [
       { text: "5 things you can see",    duration: 7 },
@@ -355,9 +376,10 @@ const mindfulnessTechniques: MindfulnessTechnique[] = [
   },
   {
     kind: "mindfulness",
-    name: "Trataka",
-    subtitle: "A yogic practice for training sustained focus",
-    instructions: "Soften your gaze on the centre point.\nLet your peripheral vision blur naturally.",
+    name: "Soft Gaze",
+    subtitle: "relaxes tired eyes · 35s",
+    unlockTier: "brilliance",
+    instructions: "Soften your eyes on the centre point. Let everything else blur.",
     benefits: "Let's increase your calm brainwave activity and relieve that eye-strain tension.",
     prompts: [
       { text: "soften your gaze",              duration: 5 },
@@ -385,6 +407,27 @@ export const techniques: Technique[] = [
   ...mindfulnessTechniques,
 ];
 
-export function randomTechnique(): Technique {
-  return techniques[Math.floor(Math.random() * techniques.length)];
+/** Same as `techniques` but split by kind, for the grouped picker UI. */
+export const breathingList: BreathingTechnique[] = breathingTechniques;
+export const mindfulnessList: MindfulnessTechnique[] = mindfulnessTechniques;
+
+import { TIERS, currentTier } from "./tiers";
+
+/** Techniques the user has unlocked at their current session count. */
+export function unlockedTechniques(completedSessions: number): Technique[] {
+  const tier = currentTier(completedSessions);
+  const tierIdx = TIERS.findIndex((t) => t.id === tier.id);
+  const reachedIds = new Set(TIERS.slice(0, tierIdx + 1).map((t) => t.id));
+  return techniques.filter((t) => reachedIds.has(t.unlockTier));
+}
+
+/** Pick a random technique from the user's unlocked set.
+ * Falls back to all techniques if completedSessions is unknown (e.g. backend
+ * fetch failed) so the practice is never blocked. */
+export function randomTechnique(completedSessions?: number): Technique {
+  const pool =
+    completedSessions === undefined
+      ? techniques
+      : unlockedTechniques(completedSessions);
+  return pool[Math.floor(Math.random() * pool.length)];
 }
