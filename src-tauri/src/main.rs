@@ -1,17 +1,31 @@
 // Niyora — macOS menu bar breathing & mindfulness app
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod analytics;
+mod config;
+mod onboarding;
+mod reminder;
+mod sessions;
+mod situational;
+
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use tauri::{
     image::Image,
+    menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Listener, Manager,
 };
-use tauri_plugin_positioner::{Position, WindowExt};
-use chrono::Timelike;
-use tauri_plugin_notification::NotificationExt;
+
+/// Last-known tray icon position+size, captured from tray events.
+/// Used by `toggle_panel` to anchor the panel directly under the tray icon
+/// in screen coordinates — more deterministic than letting the positioner
+/// plugin compute it after the window has been hidden/moved.
+struct TrayRect(Arc<Mutex<Option<(f64, f64, f64, f64)>>>);
+
+use crate::reminder::{LastSessionTime, SnoozedUntil};
+use crate::situational::{SituationalState, SituationalStateHandle};
 
 #[cfg(target_os = "macos")]
 use tauri_nspanel::{
@@ -20,10 +34,6 @@ use tauri_nspanel::{
 };
 
 const NSPANEL_STYLE_MASK_NON_ACTIVATING: i32 = 1 << 7;
-
-/// Shared timestamp of the last completed breathing session (or app launch).
-/// Reset when user completes a session; checked by the reminder loop.
-struct LastSessionTime(Arc<Mutex<Instant>>);
 
 #[tauri::command]
 fn resize_panel(app_handle: tauri::AppHandle, width: f64, height: f64) {
@@ -34,7 +44,6 @@ fn resize_panel(app_handle: tauri::AppHandle, width: f64, height: f64) {
 
 #[tauri::command]
 fn hide_panel(app_handle: tauri::AppHandle) {
-    // Reset the screen-time timer — user just completed a session
     if let Some(state) = app_handle.try_state::<LastSessionTime>() {
         *state.0.lock().unwrap() = Instant::now();
     }
@@ -48,17 +57,43 @@ fn hide_panel(app_handle: tauri::AppHandle) {
 
 fn main() {
     let last_session = Arc::new(Mutex::new(Instant::now()));
+    let situational = Arc::new(Mutex::new(SituationalState::new()));
+    let snoozed: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
+    let tray_rect: Arc<Mutex<Option<(f64, f64, f64, f64)>>> = Arc::new(Mutex::new(None));
 
     tauri::Builder::default()
         .manage(LastSessionTime(last_session.clone()))
-        .invoke_handler(tauri::generate_handler![hide_panel, resize_panel])
+        .manage(SituationalStateHandle(situational.clone()))
+        .manage(SnoozedUntil(snoozed.clone()))
+        .manage(TrayRect(tray_rect.clone()))
+        .invoke_handler(tauri::generate_handler![
+            hide_panel,
+            resize_panel,
+            situational::get_situational_snapshot,
+            analytics::log_event,
+            analytics::should_show_pss4,
+            analytics::submit_pss4,
+            analytics::dismiss_pss4,
+            analytics::pss4_history,
+            reminder::snooze_for_minutes,
+            reminder::cancel_snooze,
+            sessions::record_session,
+            sessions::get_session_stats,
+            onboarding::is_onboarded,
+            onboarding::mark_onboarded,
+            onboarding::request_notification_permission,
+        ])
         .plugin(tauri_plugin_positioner::init())
-        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_nspanel::init())
         .setup(move |app| {
             // Hide from dock — menu bar only
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
+            // Tell mac-notification-sys which app is sending notifications.
+            // Without this, notifications appear under Finder's identity.
+            #[cfg(target_os = "macos")]
+            let _ = mac_notification_sys::set_application("com.niyora.breathing");
 
             // Convert the main window to an NSPanel for proper popover behavior
             #[cfg(target_os = "macos")]
@@ -68,15 +103,87 @@ fn main() {
             let tray_icon = Image::from_bytes(include_bytes!("../icons/tray.png"))
                 .expect("failed to load tray icon");
 
+            // Tray right-click menu. To add items: extend the MenuBuilder chain below
+            // and add a matching arm to on_menu_event. Each item needs a unique id.
+            //   "show"      -> Show Niyora (toggles the panel)
+            //   "snooze_1h" -> Suppress reminders for the next 1 hour
+            //   "quit"      -> Cleanly exit the app
+            let show_item = MenuItemBuilder::with_id("show", "Show Niyora").build(app)?;
+            let snooze_item =
+                MenuItemBuilder::with_id("snooze_1h", "Snooze for 1 hour").build(app)?;
+            let quit_item = MenuItemBuilder::with_id("quit", "Quit Niyora").build(app)?;
+            // Dev-only items: trigger a notification on demand and re-trigger
+            // the onboarding flow. Both removed before App Store submission.
+            #[cfg(debug_assertions)]
+            let test_notif_item =
+                MenuItemBuilder::with_id("test_notif", "Test notification").build(app)?;
+            #[cfg(debug_assertions)]
+            let reset_onboarding_item =
+                MenuItemBuilder::with_id("reset_onboarding", "Reset onboarding (dev)").build(app)?;
+            let mut menu_builder = MenuBuilder::new(app)
+                .item(&show_item)
+                .item(&PredefinedMenuItem::separator(app)?)
+                .item(&snooze_item);
+            #[cfg(debug_assertions)]
+            {
+                menu_builder = menu_builder
+                    .item(&PredefinedMenuItem::separator(app)?)
+                    .item(&test_notif_item)
+                    .item(&reset_onboarding_item);
+            }
+            let menu = menu_builder
+                .item(&PredefinedMenuItem::separator(app)?)
+                .item(&quit_item)
+                .build()?;
+
             TrayIconBuilder::with_id("tray")
                 .icon(tray_icon)
                 .icon_as_template(true)
                 .tooltip("Niyora — Breathe")
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "show" => {
+                        #[cfg(target_os = "macos")]
+                        toggle_panel(app);
+                    }
+                    "snooze_1h" => {
+                        if let Some(state) = app.try_state::<SnoozedUntil>() {
+                            let deadline = Instant::now() + Duration::from_secs(3600);
+                            *state.0.lock().unwrap() = Some(deadline);
+                        }
+                        let _ = analytics::append_event(
+                            "snooze_started",
+                            serde_json::json!({ "duration_minutes": 60 }),
+                        );
+                    }
+                    "quit" => {
+                        app.exit(0);
+                    }
+                    #[cfg(debug_assertions)]
+                    "test_notif" => {
+                        reminder::fire_test_notification(app.clone());
+                    }
+                    #[cfg(debug_assertions)]
+                    "reset_onboarding" => {
+                        let _ = onboarding::reset_onboarded();
+                        // Force the panel to re-show so the user sees the
+                        // onboarding flow on the very next interaction.
+                        let _ = app.emit("onboarding_reset", ());
+                    }
+                    _ => {}
+                })
                 .on_tray_icon_event(|tray, event| {
-                    // Let the positioner plugin track tray position
                     tauri_plugin_positioner::on_tray_event(tray.app_handle(), &event);
 
-                    // Toggle popover on left click
+                    // Capture tray icon rect on every event so toggle_panel
+                    // always has a fresh anchor point.
+                    if let Some(rect) = tray_rect_from_event(&event) {
+                        if let Some(state) = tray.app_handle().try_state::<TrayRect>() {
+                            *state.0.lock().unwrap() = Some(rect);
+                        }
+                    }
+
                     if let TrayIconEvent::Click {
                         button: MouseButton::Left,
                         button_state: MouseButtonState::Up,
@@ -88,11 +195,39 @@ fn main() {
                 })
                 .build(app)?;
 
-            // Start background thread for smart screen-time reminders
+            // Listen for "open the panel from a notification" requests.
+            // Fired by the notification action handler in reminder.rs.
+            let app_handle_for_listen = app.handle().clone();
+            app.handle().listen("request_panel_show", move |_| {
+                let h = app_handle_for_listen.clone();
+                let _ = app_handle_for_listen.run_on_main_thread(move || {
+                    #[cfg(target_os = "macos")]
+                    {
+                        let panel = h.get_webview_panel("main").unwrap();
+                        if !panel.is_visible() {
+                            toggle_panel(&h);
+                        }
+                    }
+                    #[cfg(not(target_os = "macos"))]
+                    let _ = h;
+                });
+            });
+
+            // Start situational signal collectors (idle/screen-time + score loop)
+            situational::start_all(situational.clone());
+
+            // Smart screen-time reminder thread
             let app_handle = app.handle().clone();
             let last_session_for_thread = last_session.clone();
+            let situational_for_thread = situational.clone();
+            let snoozed_for_thread = snoozed.clone();
             std::thread::spawn(move || {
-                reminder_loop(app_handle, last_session_for_thread);
+                reminder::run(
+                    app_handle,
+                    last_session_for_thread,
+                    situational_for_thread,
+                    snoozed_for_thread,
+                );
             });
 
             Ok(())
@@ -108,7 +243,6 @@ fn setup_panel(app_handle: &tauri::AppHandle) {
         .get_webview_window("main")
         .expect("no window labeled 'main'");
 
-    // Create a delegate that fires an event when the panel loses focus
     let delegate = panel_delegate!(NiyoraPanelDelegate {
         window_did_resign_key
     });
@@ -120,26 +254,20 @@ fn setup_panel(app_handle: &tauri::AppHandle) {
         }
     }));
 
-    // Convert window to NSPanel
     let panel = window.to_panel().unwrap();
 
-    // Float above the menu bar
     panel.set_level(NSMainMenuWindowLevel + 1);
 
-    // Can appear on all Spaces, stay in place during Mission Control, work with fullscreen
     panel.set_collection_behaviour(
         NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces
             | NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary
             | NSWindowCollectionBehavior::NSWindowCollectionBehaviorFullScreenAuxiliary,
     );
 
-    // Non-activating: won't steal focus from other apps
     panel.set_style_mask(NSPANEL_STYLE_MASK_NON_ACTIVATING);
 
-    // Set the delegate for resign-key notifications
     panel.set_delegate(delegate);
 
-    // Auto-hide when the panel loses focus (click outside)
     let handle = app_handle.clone();
     app_handle.listen("panel_did_resign_key", move |_| {
         let panel = handle.get_webview_panel("main").unwrap();
@@ -149,7 +277,26 @@ fn setup_panel(app_handle: &tauri::AppHandle) {
     });
 }
 
-/// Toggle the panel: show positioned below tray, or hide.
+/// Extract the tray icon's position+size from any TrayIconEvent variant
+/// that carries a `rect`. Returns None for events without one.
+/// All coordinates are in physical pixels.
+fn tray_rect_from_event(event: &TrayIconEvent) -> Option<(f64, f64, f64, f64)> {
+    let rect = match event {
+        TrayIconEvent::Click { rect, .. } => rect,
+        TrayIconEvent::DoubleClick { rect, .. } => rect,
+        TrayIconEvent::Enter { rect, .. } => rect,
+        TrayIconEvent::Move { rect, .. } => rect,
+        TrayIconEvent::Leave { rect, .. } => rect,
+        _ => return None,
+    };
+    let pos = rect.position.to_physical::<f64>(1.0);
+    let size = rect.size.to_physical::<f64>(1.0);
+    Some((pos.x, pos.y, size.width, size.height))
+}
+
+/// Toggle the panel: show anchored directly under the tray icon, or hide.
+/// Anchored using the captured tray rect — deterministic, no positioner
+/// race conditions, no off-screen clipping at the edges.
 #[cfg(target_os = "macos")]
 fn toggle_panel(app_handle: &tauri::AppHandle) {
     let panel = app_handle.get_webview_panel("main").unwrap();
@@ -159,92 +306,50 @@ fn toggle_panel(app_handle: &tauri::AppHandle) {
         return;
     }
 
-    // Position below the tray icon and reload for a fresh session
     if let Some(window) = app_handle.get_webview_window("main") {
-        let _ = window.move_window(Position::TrayBottomCenter);
+        let tray = app_handle
+            .try_state::<TrayRect>()
+            .and_then(|s| *s.0.lock().unwrap());
 
-        // Clamp to screen bounds so the panel doesn't go off-edge
-        if let Ok(pos) = window.outer_position() {
-            if let Ok(monitor) = window.current_monitor() {
-                if let Some(monitor) = monitor {
-                    let screen = monitor.size();
-                    let scale = monitor.scale_factor();
-                    let win_size = window.outer_size().unwrap_or(tauri::Size::Logical(
-                        tauri::LogicalSize { width: 420.0, height: 520.0 },
-                    ).to_physical(scale));
-                    let screen_w = screen.width as i32;
-                    let win_w = win_size.width as i32;
-                    let mut x = pos.x;
-                    let y = pos.y;
-                    // If panel extends past right edge, nudge left
-                    if x + win_w > screen_w {
-                        x = screen_w - win_w - 8;
-                    }
-                    // If panel extends past left edge, nudge right
-                    if x < 0 {
-                        x = 8;
-                    }
-                    let _ = window.set_position(tauri::Position::Physical(
-                        tauri::PhysicalPosition { x, y },
-                    ));
-                }
+        if let (Some((tx, _ty, tw, th)), Ok(Some(monitor))) = (tray, window.current_monitor()) {
+            let screen = monitor.size();
+            let scale = monitor.scale_factor();
+            let panel_w_logical: f64 = 420.0;
+            let panel_w_phys = panel_w_logical * scale;
+            let screen_w = screen.width as f64;
+            let edge_margin = 8.0 * scale;
+
+            // Center panel under tray icon, then clamp to screen edges.
+            let tray_center_x = tx + tw / 2.0;
+            let mut x_phys = tray_center_x - panel_w_phys / 2.0;
+            if x_phys + panel_w_phys + edge_margin > screen_w {
+                x_phys = screen_w - panel_w_phys - edge_margin;
             }
-        }
+            if x_phys < edge_margin {
+                x_phys = edge_margin;
+            }
 
-        // Reload the webview to get a completely fresh React mount
-        let _ = window.eval("window.location.reload()");
+            // Panel top sits a few pixels below the tray icon's bottom.
+            let gap_phys = 4.0 * scale;
+            let y_phys = th + gap_phys; // tray rect is in screen coords starting at menu bar
+
+            let _ = window.set_position(tauri::Position::Physical(
+                tauri::PhysicalPosition {
+                    x: x_phys.round() as i32,
+                    y: y_phys.round() as i32,
+                },
+            ));
+        }
     }
 
-    // Small delay to let reload start before showing
     std::thread::sleep(std::time::Duration::from_millis(50));
     panel.show();
+
+    // Tell the React app to reset its session state for this open.
+    // Replaces the previous full-page reload, which caused a visible reflow
+    // on every tray click.
+    let _ = app_handle.emit("panel_did_show", ());
 }
 
-/// Non-macOS fallback (won't compile on other platforms without this).
 #[cfg(not(target_os = "macos"))]
 fn toggle_panel(_app_handle: &tauri::AppHandle) {}
-
-/// Smart screen-time reminder: notifies after 90 minutes of continuous screen time
-/// during work hours (9 AM - 6 PM). Resets when the user completes a breathing session.
-fn reminder_loop(app: tauri::AppHandle, last_session: Arc<Mutex<Instant>>) {
-    use chrono::Local;
-    use std::thread::sleep;
-    use std::time::Duration;
-
-    const SCREEN_TIME_LIMIT: Duration = Duration::from_secs(90 * 60); // 90 minutes
-    const CHECK_INTERVAL: Duration = Duration::from_secs(60);         // check every minute
-    const WORK_HOUR_START: u32 = 9;
-    const WORK_HOUR_END: u32 = 18;
-
-    let mut notified_for_current_period = false;
-
-    loop {
-        sleep(CHECK_INTERVAL);
-
-        let now = Local::now();
-        let hour = now.hour();
-
-        // Only remind during work hours
-        if !(WORK_HOUR_START..WORK_HOUR_END).contains(&hour) {
-            continue;
-        }
-
-        let elapsed = last_session.lock().unwrap().elapsed();
-
-        // If the timer was reset (session completed), clear the notification flag
-        if elapsed < SCREEN_TIME_LIMIT {
-            notified_for_current_period = false;
-            continue;
-        }
-
-        // 90+ minutes elapsed — send one notification per period
-        if !notified_for_current_period {
-            let _ = app.notification()
-                .builder()
-                .title("Niyora")
-                .body("You've been at your screen for 90 minutes. Take a breathing break?")
-                .show();
-            notified_for_current_period = true;
-        }
-    }
-}

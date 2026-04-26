@@ -2,19 +2,29 @@ import { useRef, useEffect, useCallback, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   randomTechnique,
+  breathingList,
+  mindfulnessList,
   type Technique,
   type BreathingTechnique,
   type MindfulnessTechnique,
 } from "./techniques";
+import { TIERS, currentTier } from "./tiers";
+
+function intendedDurationSec(t: Technique): number {
+  if (t.kind === "breathing") {
+    const perRound = t.phases.reduce((sum, p) => sum + p.duration, 0);
+    return perRound * t.rounds;
+  }
+  return t.prompts.reduce((sum, p) => sum + p.duration, 0);
+}
+import { scoreToBallGradient, scoreToOrbAccent, type SituationalSnapshot } from "./useSnapshot";
 
 // --- Config ---
-const SM_WIDTH = 300;
-const SM_HEIGHT = 380;
 const LG_WIDTH = 420;
 const LG_HEIGHT = 520;
-// Used by motion functions outside the component — always reference small size as base
-let WIDTH = SM_WIDTH;
-let HEIGHT = SM_HEIGHT;
+// Used by motion functions outside the component
+let WIDTH = LG_WIDTH;
+let HEIGHT = LG_HEIGHT;
 const PARTICLE_COUNT = 70;
 const INTRO_DURATION = 3;
 
@@ -327,6 +337,7 @@ interface AnimState {
   technique: Technique;
   time: number;
   waiting: boolean; // true = pre-session info screen, particles drift but no intro
+  paused: boolean; // user tapped the canvas to pause; freezes phase/prompt timers
   introTime: number; introDone: boolean;
   // Breathing state
   phaseIndex: number; phaseTime: number; round: number;
@@ -340,12 +351,12 @@ interface AnimState {
   labelOpacity: number; nameOpacity: number; subtitleOpacity: number;
 }
 
-function createState(w: number, h: number): AnimState {
+function createState(w: number, h: number, completedSessions?: number): AnimState {
   return {
     particles: Array.from({ length: PARTICLE_COUNT }, () => createParticle(w, h)),
     noise: createNoise(),
-    technique: randomTechnique(),
-    time: 0, waiting: true, introTime: 0, introDone: false,
+    technique: randomTechnique(completedSessions),
+    time: 0, waiting: true, paused: false, introTime: 0, introDone: false,
     phaseIndex: 0, phaseTime: 0, round: 0,
     promptIndex: 0, promptTime: 0, promptOpacity: 0,
     leafX: w * 0.35, leafY: h * 0.5, leafOpacity: 0, leafVisible: false,
@@ -424,22 +435,88 @@ function useButtonParticles() {
 // =====================================================================
 // COMPONENT
 // =====================================================================
-interface Props { onComplete: () => void; }
+interface Props {
+  onComplete: () => void;
+  snapshot?: SituationalSnapshot | null;
+  completedSessions?: number;
+}
 
-export default function BreathingSession({ onComplete }: Props) {
-  const [expanded, setExpanded] = useState(true);
-  // Update module-level vars so motion functions pick up the size
-  WIDTH = expanded ? LG_WIDTH : SM_WIDTH;
-  HEIGHT = expanded ? LG_HEIGHT : SM_HEIGHT;
+export default function BreathingSession({ onComplete, snapshot, completedSessions }: Props) {
+  WIDTH = LG_WIDTH;
+  HEIGHT = LG_HEIGHT;
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const stateRef = useRef<AnimState>(createState(LG_WIDTH, LG_HEIGHT));
+  const stateRef = useRef<AnimState>(createState(LG_WIDTH, LG_HEIGHT, completedSessions));
   const rafRef = useRef<number>(0);
   const sizeRef = useRef({ w: LG_WIDTH, h: LG_HEIGHT });
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [muted, setMuted] = useState(false);
   const [waiting, setWaiting] = useState(true);
   const [transitioning, setTransitioning] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [showPicker, setShowPicker] = useState(false);
+  // Forces a re-render when the user picks a different technique while the
+  // info screen is showing — stateRef.current.technique mutates, but React
+  // needs a nudge to redraw the technique benefits / name.
+  const [, setPickNonce] = useState(0);
+
+  // Compute which techniques are locked at the user's current tier.
+  const userTier = currentTier(completedSessions ?? 0);
+  const userTierIdx = TIERS.findIndex((t) => t.id === userTier.id);
+  const isLocked = (t: Technique) => {
+    const techIdx = TIERS.findIndex((x) => x.id === t.unlockTier);
+    return techIdx > userTierIdx;
+  };
+  const unlockTierName = (t: Technique) =>
+    TIERS.find((x) => x.id === t.unlockTier)?.name ?? "";
+  const lockTooltip = (t: Technique) => {
+    const need = TIERS.find((x) => x.id === t.unlockTier)?.threshold ?? 0;
+    const remaining = Math.max(0, need - (completedSessions ?? 0));
+    if (remaining <= 0) return `Practice more to unlock`;
+    return `Opens after ${remaining} more ${remaining === 1 ? "practice" : "practices"} · ${unlockTierName(t)}`;
+  };
+
+  const selectTechnique = useCallback((t: Technique) => {
+    stateRef.current.technique = t;
+    // Reset intro/animation state so the new technique gets a fresh start.
+    stateRef.current.introTime = 0;
+    stateRef.current.introDone = false;
+    stateRef.current.phaseIndex = 0;
+    stateRef.current.phaseTime = 0;
+    stateRef.current.round = 0;
+    stateRef.current.promptIndex = 0;
+    stateRef.current.promptTime = 0;
+    setShowPicker(false);
+    setPickNonce((n) => n + 1);
+  }, []);
   const btnParticles = useButtonParticles();
+
+  // Session-recording refs. Session is "really started" once the 3s intro
+  // finishes. Closes during the intro are not recorded (user didn't commit).
+  const sessionInfoRef = useRef<{
+    startedAt: string;
+    startTimeMs: number;
+    techniqueName: string;
+    techniqueKind: string;
+    intendedDurationSec: number;
+  } | null>(null);
+  const loggedRef = useRef(false);
+
+  const logSession = useCallback((completed: boolean) => {
+    const info = sessionInfoRef.current;
+    if (!info || loggedRef.current) return;
+    loggedRef.current = true;
+    const actualSec = Math.max(0, Math.round((performance.now() - info.startTimeMs) / 1000));
+    invoke("record_session", {
+      startedAt: info.startedAt,
+      techniqueName: info.techniqueName,
+      techniqueKind: info.techniqueKind,
+      intendedDurationSec: info.intendedDurationSec,
+      actualDurationSec: actualSec,
+      completed,
+    }).catch(() => {
+      /* best-effort; never block UX on storage */
+    });
+  }, []);
 
   const handleBegin = useCallback(() => {
     btnParticles.stopEmitting();
@@ -459,7 +536,30 @@ export default function BreathingSession({ onComplete }: Props) {
     else { audio.muted = true; setMuted(true); }
   }, []);
 
+  const togglePause = useCallback(() => {
+    const s = stateRef.current;
+    // Only allow pause during the active practice — not on the info screen,
+    // not during the 3s intro, not on the "well done" outro.
+    if (!s.introDone || s.done || s.waiting) return;
+    s.paused = !s.paused;
+    setPaused(s.paused);
+    const audio = audioRef.current;
+    if (audio) {
+      if (s.paused) {
+        audio.pause();
+      } else if (!muted) {
+        audio.play().catch(() => {});
+      }
+    }
+  }, [muted]);
+
   const handleDone = useCallback(async () => {
+    // Record an abandoned session if the user got past the intro but didn't
+    // finish. If they're already in the "done" state, the completed log fired
+    // when rounds finished; loggedRef prevents double-recording either way.
+    if (sessionInfoRef.current && !loggedRef.current) {
+      logSession(false);
+    }
     // Fade out audio before closing
     const audio = audioRef.current;
     if (audio) {
@@ -471,7 +571,7 @@ export default function BreathingSession({ onComplete }: Props) {
       }, 30);
     }
     await invoke("hide_panel");
-  }, []);
+  }, [logSession]);
 
   // Background audio — fade in on mount, fade out on done
   useEffect(() => {
@@ -502,15 +602,6 @@ export default function BreathingSession({ onComplete }: Props) {
     };
   }, []);
 
-  const toggleExpand = useCallback(async () => {
-    const next = !expanded;
-    const w = next ? LG_WIDTH : SM_WIDTH;
-    const h = next ? LG_HEIGHT : SM_HEIGHT;
-    try {
-      await invoke("resize_panel", { width: w, height: h });
-    } catch { /* dev mode fallback */ }
-    setExpanded(next);
-  }, [expanded]);
 
   useEffect(() => {
     sizeRef.current = { w: WIDTH, h: HEIGHT };
@@ -549,11 +640,11 @@ export default function BreathingSession({ onComplete }: Props) {
       const rawDt = (now - lastTime) / 1000;
       lastTime = now;
 
-      // If more than 0.5s passed, the panel was hidden and just reopened — reset
-      if (rawDt > 0.5) {
-        stateRef.current = createState(WIDTH, HEIGHT);
-      }
-
+      // Clamp the per-frame delta so a stalled frame (background throttling,
+      // GC pause, paused tab) doesn't fast-forward the session. Component
+      // remount on tray reopen handles the "fresh start" case via openKey,
+      // so we no longer reset state here — that previously re-rolled the
+      // technique mid-session and corrupted session-log metadata.
       const dt = Math.min(rawDt, 0.05);
       const s = stateRef.current;
       s.time += dt;
@@ -577,6 +668,17 @@ export default function BreathingSession({ onComplete }: Props) {
         else { s.nameOpacity = lerpVal(s.nameOpacity, 0, dt * 4); s.subtitleOpacity = lerpVal(s.subtitleOpacity, 0, dt * 4); }
         if (s.introTime >= INTRO_DURATION) {
           s.introDone = true; s.nameOpacity = 0; s.subtitleOpacity = 0;
+          // Mark the session as truly started — past the intro the user has committed.
+          // Closes before this point are not recorded.
+          if (!sessionInfoRef.current) {
+            sessionInfoRef.current = {
+              startedAt: new Date().toISOString(),
+              startTimeMs: performance.now(),
+              techniqueName: technique.name,
+              techniqueKind: technique.kind,
+              intendedDurationSec: intendedDurationSec(technique),
+            };
+          }
           if (!isMindful) {
             const bt = technique as BreathingTechnique;
             s.targetBgColor = [...visual.colors[bt.phases[0].type]];
@@ -592,7 +694,7 @@ export default function BreathingSession({ onComplete }: Props) {
       let currentLabel = "";
       let phaseT = 0;
 
-      if (s.introDone && !s.done && !isMindful) {
+      if (s.introDone && !s.done && !isMindful && !s.paused) {
         const bt = technique as BreathingTechnique;
         const phase = bt.phases[s.phaseIndex];
         currentPhaseType = phase.type; currentLabel = phase.label;
@@ -610,7 +712,7 @@ export default function BreathingSession({ onComplete }: Props) {
       let currentPromptText = "";
       // prompt progress tracking
 
-      if (s.introDone && !s.done && isMindful) {
+      if (s.introDone && !s.done && isMindful && !s.paused) {
         const mt = technique as MindfulnessTechnique;
         const prompt = mt.prompts[s.promptIndex];
         currentPromptText = prompt.text;
@@ -636,6 +738,11 @@ export default function BreathingSession({ onComplete }: Props) {
 
       // ── COMPLETION ──
       if (s.done) {
+        // Record the completed session on the first frame after rounds finish.
+        // loggedRef guards against double-recording if user closes during "well done".
+        if (!loggedRef.current && sessionInfoRef.current) {
+          logSession(true);
+        }
         s.doneTime += dt;
         if (s.doneTime < 1.5) s.targetBgColor = [35, 30, 14];
         else s.targetBgColor = [30, 15, 10];
@@ -645,7 +752,7 @@ export default function BreathingSession({ onComplete }: Props) {
           audio.volume = Math.max(0, audio.volume - dt * 0.15);
           if (audio.volume <= 0) { audio.pause(); audio.currentTime = 0; }
         }
-        if (s.doneTime > 7) { onComplete(); return; }
+        if (s.doneTime > 4) { onComplete(); return; }
       }
 
       s.bgColor = lerpHSL(s.bgColor, s.targetBgColor, dt * 1.2);
@@ -653,7 +760,9 @@ export default function BreathingSession({ onComplete }: Props) {
         ? s.round / (technique as BreathingTechnique).rounds : 0;
 
       // ── UPDATE PARTICLES ──
-      for (const p of s.particles) {
+      // When paused, skip physics so the "video" freezes on the current frame.
+      // Audio is paused separately in togglePause().
+      if (!s.paused) for (const p of s.particles) {
         const t = s.time;
         const nx = s.noise(p.noiseOffsetX + t * 0.3, p.noiseOffsetY) * 0.8;
         const ny = s.noise(p.noiseOffsetX, p.noiseOffsetY + t * 0.3) * 0.8;
@@ -819,27 +928,27 @@ export default function BreathingSession({ onComplete }: Props) {
         const glowOpacity = s.done ? lerpVal(0.5, 0, Math.min(s.doneTime / 3, 1)) : pulse;
 
         // Outer halo (large, soft)
-        const grad3 = ctx.createRadialGradient(focusX, focusY, 0, focusX, focusY, 80);
-        grad3.addColorStop(0, `hsla(40, 50%, 55%, ${glowOpacity * 0.1})`);
+        const grad3 = ctx.createRadialGradient(focusX, focusY, 0, focusX, focusY, 130);
+        grad3.addColorStop(0, `hsla(40, 50%, 55%, ${glowOpacity * 0.12})`);
         grad3.addColorStop(1, `hsla(40, 50%, 55%, 0)`);
-        ctx.fillStyle = grad3; ctx.fillRect(focusX - 80, focusY - 80, 160, 160);
+        ctx.fillStyle = grad3; ctx.fillRect(focusX - 130, focusY - 130, 260, 260);
 
         // Middle glow
-        const grad2 = ctx.createRadialGradient(focusX, focusY, 0, focusX, focusY, 36);
-        grad2.addColorStop(0, `hsla(38, 55%, 60%, ${glowOpacity * 0.3})`);
+        const grad2 = ctx.createRadialGradient(focusX, focusY, 0, focusX, focusY, 64);
+        grad2.addColorStop(0, `hsla(38, 55%, 60%, ${glowOpacity * 0.35})`);
         grad2.addColorStop(1, `hsla(38, 55%, 60%, 0)`);
-        ctx.fillStyle = grad2; ctx.fillRect(focusX - 36, focusY - 36, 72, 72);
+        ctx.fillStyle = grad2; ctx.fillRect(focusX - 64, focusY - 64, 128, 128);
 
         // Core dot — warm golden, steady
         ctx.beginPath();
-        ctx.arc(focusX, focusY, 8 + pulse * 3, 0, Math.PI * 2);
+        ctx.arc(focusX, focusY, 18 + pulse * 5, 0, Math.PI * 2);
         ctx.fillStyle = `hsla(38, 60%, 65%, ${glowOpacity * 0.9})`;
         ctx.fill();
 
         // Inner bright point
         ctx.beginPath();
-        ctx.arc(focusX, focusY, 3, 0, Math.PI * 2);
-        ctx.fillStyle = `hsla(40, 40%, 85%, ${glowOpacity * 0.8})`;
+        ctx.arc(focusX, focusY, 7, 0, Math.PI * 2);
+        ctx.fillStyle = `hsla(40, 40%, 85%, ${glowOpacity * 0.85})`;
         ctx.fill();
       }
 
@@ -906,13 +1015,29 @@ export default function BreathingSession({ onComplete }: Props) {
         const textY = HEIGHT * 0.72;
         const startY = textY - ((lines.length - 1) * lineHeight) / 2;
         lines.forEach((line, i) => ctx.fillText(line, cx, startY + i * lineHeight));
+        // Persistent technique instruction below the rotating prompt.
+        ctx.font = "400 12px 'Poppins', sans-serif";
+        ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
+        const instructionLines = wrapText(ctx, technique.instructions, WIDTH - 60);
+        instructionLines.forEach((line, i) => {
+          ctx.fillText(line, cx, HEIGHT * 0.86 + i * 16);
+        });
       } else {
-        // Breathing instruction
+        // Breathing phase label
         s.labelOpacity = lerpVal(s.labelOpacity, 0.9, dt * 3);
         ctx.font = "500 15px 'Poppins', sans-serif";
         ctx.fillStyle = `rgba(255, 255, 255, ${s.labelOpacity})`;
         ctx.fillText(currentLabel, cx, HEIGHT * 0.72);
+        // Persistent technique instruction below the phase label.
+        // Stays visible the whole session so users never have to remember.
+        ctx.font = "400 12px 'Poppins', sans-serif";
+        ctx.fillStyle = `rgba(255, 255, 255, ${s.labelOpacity * 0.9})`;
+        const instructionLines = wrapText(ctx, technique.instructions, WIDTH - 60);
+        instructionLines.forEach((line, i) => {
+          ctx.fillText(line, cx, HEIGHT * 0.79 + i * 16);
+        });
       }
+
 
       // Round dots (breathing only)
       if (s.introDone && !s.done && !isMindful) {
@@ -992,11 +1117,43 @@ export default function BreathingSession({ onComplete }: Props) {
     }
     rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [onComplete, WIDTH, HEIGHT]);
+  }, [onComplete, WIDTH, HEIGHT, logSession]);
 
   return (
     <div style={{ width: WIDTH, height: HEIGHT, borderRadius: 16, overflow: "hidden", position: "relative", cursor: "default", userSelect: "none" }}>
-      <canvas ref={canvasRef} style={{ width: WIDTH, height: HEIGHT, display: "block" }} />
+      <canvas ref={canvasRef} onClick={togglePause} style={{ width: WIDTH, height: HEIGHT, display: "block", cursor: "pointer" }} />
+      {/* Pause/resume icon — centered overlay, only visible during active practice. */}
+      {!waiting && (
+        <button
+          onClick={(e) => { e.stopPropagation(); togglePause(); }}
+          title={paused ? "Resume" : "Pause"}
+          style={{
+            position: "absolute",
+            left: "50%", top: "50%",
+            transform: "translate(-50%, -50%)",
+            width: 48, height: 48,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            background: paused ? "rgba(255,255,255,0.10)" : "transparent",
+            border: paused ? "1px solid rgba(255,255,255,0.18)" : "1px solid transparent",
+            color: paused ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0)",
+            cursor: "pointer", borderRadius: "50%", outline: "none",
+            transition: "opacity 0.25s ease, background 0.25s ease, border-color 0.25s ease, color 0.25s ease",
+            opacity: paused ? 1 : 0,
+            pointerEvents: paused ? "auto" : "none",
+            zIndex: 9,
+            backdropFilter: paused ? "blur(6px)" : "none",
+            WebkitBackdropFilter: paused ? "blur(6px)" : "none",
+          }}
+        >
+          {paused ? (
+            // Play icon (resume)
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+          ) : (
+            // Pause icon (placeholder, hidden when not paused)
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z" /></svg>
+          )}
+        </button>
+      )}
       {/* Pre-session info screen */}
       {waiting && (
         <div style={{
@@ -1018,28 +1175,72 @@ export default function BreathingSession({ onComplete }: Props) {
           {/* Content */}
           <div
             className={transitioning ? "info-exit-content" : ""}
-            style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", alignItems: "center", padding: "0 36px", textAlign: "center" }}
+            style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "0 24px", textAlign: "center" }}
           >
-            {/* Logo */}
-            <img
-              className="info-fade-1"
-              src="/icons/niyora-logo.png"
-              alt="Niyora"
-              style={{ width: 36, height: 36, marginBottom: 8, opacity: 0.8 }}
-              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-            />
-            {/* Brand name */}
-            <div className="info-fade-1" style={{ fontSize: 13, fontWeight: 500, letterSpacing: "3px", textTransform: "uppercase", color: "rgba(255, 255, 255, 0.5)", marginBottom: 4 }}>
-              Niyora
+            {/* Compact header */}
+            <div className="info-fade-1" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <img
+                src="/icons/niyora-logo.png"
+                alt="Niyora"
+                style={{ width: 18, height: 18, opacity: 0.85 }}
+                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+              />
+              <div style={{ fontSize: 13, fontWeight: 500, letterSpacing: "3px", textTransform: "uppercase", color: "rgba(255, 255, 255, 0.7)" }}>
+                Niyora
+              </div>
             </div>
             {/* Tagline */}
-            <div className="info-fade-2" style={{ fontSize: 11, fontWeight: 300, color: "rgba(255, 255, 255, 0.3)", marginBottom: 40 }}>
+            <div className="info-fade-2" style={{ fontSize: 11, fontWeight: 300, color: "rgba(255, 255, 255, 0.4)", marginBottom: 18 }}>
               Calm in 60 seconds
             </div>
-            {/* Benefit — hero text */}
-            <div className="info-fade-3" style={{ fontSize: 17, fontWeight: 400, lineHeight: 1.7, color: "rgba(255, 255, 255, 0.75)", marginBottom: 40, maxWidth: 320 }}>
-              {stateRef.current.technique.benefits}
+            {/* Big gas-planet ball — color + atmospheric glow reflect today's Niyora Index */}
+            {(() => {
+              const score = snapshot?.score ?? 100;
+              const grad = scoreToBallGradient(score);
+              const accent = scoreToOrbAccent(score);
+              return (
+                <div
+                  className="info-fade-3 stress-ball"
+                  style={{
+                    background: `radial-gradient(circle at 35% 30%, ${grad.highlight} 0%, ${grad.mid} 45%, ${grad.edge} 100%)`,
+                    boxShadow: `
+                      0 0 28px 4px ${grad.glow},
+                      0 0 64px 16px ${grad.glowFaint},
+                      0 24px 50px rgba(0, 0, 0, 0.4),
+                      inset -22px -18px 36px rgba(0, 0, 0, 0.32),
+                      inset 14px 10px 26px rgba(255, 255, 255, 0.10)
+                    `,
+                    // Drives the cloud whorls in CSS — calm score (>=80) gets
+                    // strength 0 so the orb is clean; higher stress brings
+                    // visible drift in the matching tier hue.
+                    ["--orb-hue" as string]: accent.hue,
+                    ["--orb-cloud" as string]: accent.strength,
+                  }}
+                />
+              );
+            })()}
+            {/* Technique name + subtitle — so users see what they're about
+                to do (and decide whether to "Try a different one"). */}
+            <div className="info-fade-3" style={{ marginTop: 16, textAlign: "center" }}>
+              <div style={{
+                fontSize: 18,
+                fontWeight: 500,
+                letterSpacing: "0.5px",
+                color: "rgba(255, 255, 255, 0.95)",
+                marginBottom: 2,
+              }}>
+                {stateRef.current.technique.name}
+              </div>
+              <div style={{
+                fontSize: 12,
+                fontWeight: 300,
+                letterSpacing: "0.3px",
+                color: "rgba(255, 255, 255, 0.55)",
+              }}>
+                {stateRef.current.technique.subtitle}
+              </div>
             </div>
+            <div style={{ height: 18 }} />
             {/* Begin button */}
             <div style={{ position: "relative" }}
               onMouseEnter={btnParticles.startEmitting}
@@ -1082,34 +1283,102 @@ export default function BreathingSession({ onComplete }: Props) {
                 }} />
               )}
             </div>
+            {/* Secondary action — open the technique picker. */}
+            <button
+              className="info-fade-4 info-secondary-btn"
+              onClick={() => setShowPicker(true)}
+              disabled={transitioning}
+            >
+              Try a different one
+            </button>
           </div>
         </div>
       )}
-      {/* Top-left: Expand/collapse */}
-      <button onClick={toggleExpand} title={expanded ? "Collapse" : "Expand"} style={{
-        position: "absolute", top: 8, left: 8, width: 26, height: 26,
+      {/* Pick-from-list overlay (only over the info screen). */}
+      {waiting && showPicker && (
+        <div className="picker-overlay">
+          <div className="picker-backdrop" />
+          <div className="picker-content">
+            <button
+              className="picker-back"
+              onClick={() => setShowPicker(false)}
+              title="Back"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M19 12H5M12 19l-7-7 7-7" />
+              </svg>
+            </button>
+            <div className="picker-title">Choose a practice</div>
+
+            <div className="picker-section">
+              <div className="picker-section-label">Breathing</div>
+              {breathingList.map((t) => {
+                const locked = isLocked(t);
+                return (
+                  <button
+                    key={t.name}
+                    className={`picker-row ${locked ? "is-locked niyora-tip" : ""}`}
+                    onClick={() => !locked && selectTechnique(t)}
+                    aria-disabled={locked}
+                    data-tooltip={locked ? lockTooltip(t) : undefined}
+                  >
+                    <div className="picker-row-text">
+                      <div className="picker-row-name">{t.name}</div>
+                      <div className="picker-row-sub">{t.subtitle}</div>
+                    </div>
+                    {locked && (
+                      <span className="picker-lock">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="3" y="11" width="18" height="11" rx="2" />
+                          <path d="M7 11V7a5 5 0 0110 0v4" />
+                        </svg>
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="picker-section">
+              <div className="picker-section-label">Mindfulness</div>
+              {mindfulnessList.map((t) => {
+                const locked = isLocked(t);
+                return (
+                  <button
+                    key={t.name}
+                    className={`picker-row ${locked ? "is-locked niyora-tip" : ""}`}
+                    onClick={() => !locked && selectTechnique(t)}
+                    aria-disabled={locked}
+                    data-tooltip={locked ? lockTooltip(t) : undefined}
+                  >
+                    <div className="picker-row-text">
+                      <div className="picker-row-name">{t.name}</div>
+                      <div className="picker-row-sub">{t.subtitle}</div>
+                    </div>
+                    {locked && (
+                      <span className="picker-lock">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="3" y="11" width="18" height="11" rx="2" />
+                          <path d="M7 11V7a5 5 0 0110 0v4" />
+                        </svg>
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Top-right: Mute/unmute (left of close) */}
+      <button onClick={toggleMute} className="niyora-tip" data-tooltip={muted ? "Unmute" : "Mute"} title={muted ? "Unmute" : "Mute"} style={{
+        position: "absolute", top: 8, right: 38, width: 26, height: 26,
         display: "flex", alignItems: "center", justifyContent: "center",
-        background: "transparent", border: "none", color: "rgba(255,255,255,0.2)",
+        background: "transparent", border: "none", color: "rgba(255,255,255,0.55)",
         cursor: "pointer", borderRadius: 6, zIndex: 10, transition: "all 0.2s ease", outline: "none",
       }}
-        onMouseEnter={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.5)"; e.currentTarget.style.background = "rgba(255,255,255,0.08)"; }}
-        onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.2)"; e.currentTarget.style.background = "transparent"; }}
-      >
-        {expanded ? (
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M4 1v3H1M8 11V8h3M4 4L1 1M8 8l3 3" /></svg>
-        ) : (
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M8 1v3h3M4 11V8H1M8 4l3-3M4 8L1 11" /></svg>
-        )}
-      </button>
-      {/* Top-center: Mute/unmute */}
-      <button onClick={toggleMute} title={muted ? "Unmute" : "Mute"} style={{
-        position: "absolute", top: 8, left: "50%", transform: "translateX(-50%)", width: 26, height: 26,
-        display: "flex", alignItems: "center", justifyContent: "center",
-        background: "transparent", border: "none", color: "rgba(255,255,255,0.2)",
-        cursor: "pointer", borderRadius: 6, zIndex: 10, transition: "all 0.2s ease", outline: "none",
-      }}
-        onMouseEnter={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.5)"; e.currentTarget.style.background = "rgba(255,255,255,0.08)"; }}
-        onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.2)"; e.currentTarget.style.background = "transparent"; }}
+        onMouseEnter={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.95)"; e.currentTarget.style.background = "rgba(255,255,255,0.12)"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.55)"; e.currentTarget.style.background = "transparent"; }}
       >
         {muted ? (
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5z" /><line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" /></svg>
@@ -1118,14 +1387,14 @@ export default function BreathingSession({ onComplete }: Props) {
         )}
       </button>
       {/* Top-right: Close */}
-      <button onClick={handleDone} title="Close" style={{
+      <button onClick={handleDone} className="niyora-tip" data-tooltip="Close" title="Close" style={{
         position: "absolute", top: 8, right: 8, width: 26, height: 26,
         display: "flex", alignItems: "center", justifyContent: "center",
-        background: "transparent", border: "none", color: "rgba(255,255,255,0.2)",
+        background: "transparent", border: "none", color: "rgba(255,255,255,0.55)",
         cursor: "pointer", borderRadius: 6, zIndex: 10, transition: "all 0.2s ease", outline: "none",
       }}
-        onMouseEnter={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.5)"; e.currentTarget.style.background = "rgba(255,255,255,0.08)"; }}
-        onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.2)"; e.currentTarget.style.background = "transparent"; }}
+        onMouseEnter={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.95)"; e.currentTarget.style.background = "rgba(255,255,255,0.12)"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.55)"; e.currentTarget.style.background = "transparent"; }}
       >
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M2 2l8 8M10 2l-8 8" /></svg>
       </button>
