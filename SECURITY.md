@@ -25,7 +25,7 @@ In scope:
 
 Out of scope:
 
-- The niyora.com landing page (static HTML on GitHub Pages — report to GitHub if it's a Pages issue)
+- The niyora.com landing page lives in a separate repo ([neha-prasad-ux/niyora-web](https://github.com/neha-prasad-ux/niyora-web)) and is hosted on Cloudflare Pages. Report site-only issues there.
 - Issues in third-party dependencies (please report upstream)
 
 ## What Niyora does and doesn't do
