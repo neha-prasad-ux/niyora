@@ -15,7 +15,7 @@ const MIC_POLL_INTERVAL: Duration = Duration::from_secs(15);
 const MIC_CONFIRM_TICKS: u32 = 2; // 2 consecutive ticks (~30s) before transitioning
 const BACK_TO_BACK_GAP_SECS: u64 = 10 * 60; // <10 min gap = back-to-back
 
-const APP_POLL_INTERVAL: Duration = Duration::from_secs(5);
+const APP_POLL_INTERVAL: Duration = Duration::from_secs(30);
 const APP_SWITCH_WINDOW_SECS: u64 = 30 * 60; // rolling 30-min window
 
 const INPUT_POLL_INTERVAL: Duration = Duration::from_secs(60); // diff over 1 min = events/min

@@ -97,7 +97,7 @@ function Pss4Sparkline({ history }: { history: Pss4Entry[] }) {
 export default function Settings({ onBack, onOpenPss4 }: Props) {
   const snapshot = useSnapshot();
   const liveStats = useSessionStats();
-  const [forcedSessions] = useState(() =>
+  const [forcedSessions, setForcedSessions] = useState(() =>
     import.meta.env.DEV ? readForcedSessions() : null
   );
   const completed = forcedSessions ?? liveStats.completed;
@@ -260,6 +260,31 @@ export default function Settings({ onBack, onOpenPss4 }: Props) {
         <div className="soul-footer">
           Niyora runs entirely on your Mac. No accounts, no tracking, no data sent anywhere. Breathe easy.
         </div>
+
+        {import.meta.env.DEV && (
+          <div className="soul-dev-tiers">
+            <div className="soul-dev-label">DEV · Tier preview</div>
+            <div className="soul-dev-row">
+              {TIERS.map((t) => (
+                <button
+                  key={t.id}
+                  className={`soul-dev-btn ${forcedSessions === t.threshold ? "is-current" : ""}`}
+                  onClick={() => setForcedSessions(t.threshold)}
+                  title={`${t.name} (${t.threshold})`}
+                >
+                  {t.name}
+                </button>
+              ))}
+              <button
+                className={`soul-dev-btn ${forcedSessions === null ? "is-current" : ""}`}
+                onClick={() => setForcedSessions(null)}
+                title="Use real session count"
+              >
+                Real
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
