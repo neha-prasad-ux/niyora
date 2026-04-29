@@ -27,3 +27,4 @@ src-tauri/target/
 # Playwright artifacts (regenerated on each run)
 playwright-report/
 test-results/
+.vite/
