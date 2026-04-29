@@ -1,0 +1,153 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.1.0). Leave empty to use the current commit SHA."
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, sign, notarize (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Apple Silicon
+            runner: macos-latest
+            target: aarch64-apple-darwin
+            arch: aarch64
+          - name: Intel
+            runner: macos-latest
+            target: x86_64-apple-darwin
+            arch: x86_64
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Import Developer ID cert into temp keychain
+        env:
+          P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.APPLE_CERT_P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -eo pipefail
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          P12_PATH="$RUNNER_TEMP/cert.p12"
+
+          echo "$P12_BASE64" | base64 --decode > "$P12_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          security import "$P12_PATH" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$P12_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security \
+            -T /usr/bin/productsign
+
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Make this keychain the default search list (login still searchable for Apple roots)
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+
+          security find-identity -v -p codesigning
+
+          rm -f "$P12_PATH"
+
+      - name: Build, sign, and notarize (Tauri bundler)
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # Tauri picks these up automatically when present
+        run: pnpm tauri build --target ${{ matrix.target }}
+
+      - name: Verify signatures and notarization
+        run: |
+          APP="src-tauri/target/${{ matrix.target }}/release/bundle/macos/Niyora.app"
+          DMG_DIR="src-tauri/target/${{ matrix.target }}/release/bundle/dmg"
+
+          echo "=== App signature ==="
+          codesign -dv --verbose=4 "$APP" 2>&1 | head -20
+          echo "=== Notarization staple on .app ==="
+          xcrun stapler validate "$APP" || echo "(app not stapled, may be stapled to dmg only)"
+          echo "=== DMG list ==="
+          ls -la "$DMG_DIR"
+          echo "=== Notarization staple on .dmg ==="
+          for d in "$DMG_DIR"/*.dmg; do
+            xcrun stapler validate "$d" || true
+          done
+          echo "=== Gatekeeper assessment ==="
+          spctl -a -t open --context context:primary-signature -v "$DMG_DIR"/*.dmg || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: niyora-${{ matrix.arch }}
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            src-tauri/target/${{ matrix.target }}/release/bundle/macos/Niyora.app
+          if-no-files-found: error
+
+      - name: Clean up keychain
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/build.keychain-db" || true
+
+  publish:
+    name: Publish GitHub Release
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect DMGs
+        run: |
+          mkdir -p release-files
+          find artifacts -name '*.dmg' -exec cp {} release-files/ \;
+          ls -la release-files
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Niyora ${{ github.ref_name }}
+          generate_release_notes: true
+          files: release-files/*.dmg
