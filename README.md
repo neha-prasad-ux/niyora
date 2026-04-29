@@ -95,7 +95,6 @@ niyora/
 │   │   ├── config.rs             # App data dir + config persistence
 │   │   └── onboarding.rs         # First-launch state
 │   └── tauri.conf.json
-├── docs/                         # Landing page + privacy policy + terms (GitHub Pages)
 └── tests/e2e/                    # Playwright UI tests
 ```
 
@@ -108,9 +107,19 @@ Read the full [privacy policy](https://niyora.com/privacy/). The short version:
 - **No outbound network requests** from the app. Fonts are bundled.
 - The app reads passive system signals (screen idle time, frontmost app bundle ID, mic device state, system-wide event counters) to time reminders. None of this is recorded, logged, or transmitted — it's all in-memory and used only to compute the reminder interval.
 
-## Contributing
+## For agents and contributors
 
-PRs welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md). Security issues: see [SECURITY.md](./SECURITY.md).
+If you're an AI agent (Claude Code, Cursor, Copilot, etc.) or a human contributor, start with these:
+
+- [AGENTS.md](./AGENTS.md) — conventions that apply to any agent (the [agents.md](https://agents.md) standard)
+- [CLAUDE.md](./CLAUDE.md) — Claude Code specific tips on top of AGENTS.md
+- [DESIGN.md](./DESIGN.md) — visual language, breathing techniques, soul tier system, what's in scope
+- [CONTRIBUTING.md](./CONTRIBUTING.md) — how PRs are structured
+- [SECURITY.md](./SECURITY.md) — how to report a vulnerability
+
+## Marketing site
+
+The public site at [niyora.com](https://niyora.com) lives in a separate repo: [neha-prasad-ux/niyora-web](https://github.com/neha-prasad-ux/niyora-web) (Astro, deployed via Cloudflare Pages).
 
 ## License
 
