@@ -112,12 +112,54 @@ jobs:
           echo "=== Gatekeeper assessment ==="
           spctl -a -t open --context context:primary-signature -v "$DMG_DIR"/*.dmg || true
 
+      - name: Stage signed DMG with canonical name
+        id: stage
+        run: |
+          set -eo pipefail
+          DMG_DIR="src-tauri/target/${{ matrix.target }}/release/bundle/dmg"
+          # Pick the suffix from arch
+          if [ "${{ matrix.arch }}" = "aarch64" ]; then
+            SUFFIX="AppleSilicon"
+          else
+            SUFFIX="Intel"
+          fi
+          # Strip leading v from tag (or use ref_name as-is for workflow_dispatch)
+          REF="${GITHUB_REF_NAME#v}"
+          [ -z "$REF" ] && REF="$(git rev-parse --short HEAD)"
+          STAGED="release-files"
+          mkdir -p "$STAGED"
+          SRC=$(find "$DMG_DIR" -maxdepth 1 -name '*.dmg' | head -1)
+          DEST="$STAGED/Niyora-${REF}-${SUFFIX}.dmg"
+          cp "$SRC" "$DEST"
+          echo "name=$(basename "$DEST")" >> "$GITHUB_OUTPUT"
+          echo "path=$DEST" >> "$GITHUB_OUTPUT"
+          ls -la "$STAGED"
+
+      - name: Setup Node for wrangler
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install wrangler
+        run: npm install -g wrangler
+
+      - name: Upload signed DMG to Cloudflare R2
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN_R2 }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          wrangler r2 object put \
+            "niyora-downloads/${{ steps.stage.outputs.name }}" \
+            --file "${{ steps.stage.outputs.path }}" \
+            --content-type "application/x-apple-diskimage" \
+            --remote
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: niyora-${{ matrix.arch }}
           path: |
-            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            release-files/*.dmg
             src-tauri/target/${{ matrix.target }}/release/bundle/macos/Niyora.app
           if-no-files-found: error
 
@@ -142,7 +184,8 @@ jobs:
       - name: Collect DMGs
         run: |
           mkdir -p release-files
-          find artifacts -name '*.dmg' -exec cp {} release-files/ \;
+          # Pull the canonically named DMGs the matrix jobs uploaded as artifacts
+          find artifacts -name 'Niyora-*-*.dmg' -exec cp {} release-files/ \;
           ls -la release-files
 
       - name: Create GitHub Release
