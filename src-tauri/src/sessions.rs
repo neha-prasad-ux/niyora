@@ -101,6 +101,22 @@ fn count_lines(path: &Path) -> SessionStats {
     SessionStats { completed, total }
 }
 
+/// Dev-only: deletes the sessions log so the user appears as a brand new
+/// install (zero sessions). Wired to a "Reset sessions" tray menu item that
+/// only appears in debug builds. Used to verify first-session behaviour like
+/// the Box Breath default and the AHA screen.
+#[cfg(debug_assertions)]
+pub fn reset_sessions() -> Result<(), String> {
+    let Some(path) = sessions_path() else {
+        return Ok(());
+    };
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 #[tauri::command]
 pub fn get_session_stats() -> SessionStats {
     let Some(path) = sessions_path() else {

@@ -23,17 +23,11 @@ const SLIDES: Slide[] = [
     body: "For founders, sales, devs, PMs, designers.",
     bullets: [
       "Data stays on your Mac",
-      "We notice long screen time",
-      "Soft reminder when you need it",
-      "One minute. Back to work.",
+      "We spot stress in your work patterns",
+      "We notify you when you need calm",
+      "Breathing and mindful practices, combined",
+      "Every practice under 60 seconds",
     ],
-    // Bullets stagger in over ~1.4s, then user needs time to read them.
-    durationMs: 7000,
-  },
-  {
-    eyebrow: "Made by",
-    title: "Neha Prasad",
-    body: "A doc (in Indian system of medicine) turned designer.",
   },
 ];
 
@@ -43,9 +37,12 @@ export default function Onboarding({ onDone }: Props) {
   const [index, setIndex] = useState(0);
   const [finishing, setFinishing] = useState(false);
 
-  // Auto-advance through slides 0 → 1 → 2, then stop on the final slide
-  // so the user can read it and click Begin at their own pace.
+  // The first slide (value-prop with the bullet list) waits for a click —
+  // it has the most to read and shouldn't disappear on people. Subsequent
+  // slides (just a name + tagline) auto-advance gently. The last slide
+  // always stops so the user can hit Begin at their own pace.
   useEffect(() => {
+    if (index === 0) return;
     if (index >= SLIDES.length - 1) return;
     const ms = SLIDES[index].durationMs ?? SLIDE_DURATION_MS;
     const t = setTimeout(() => setIndex((i) => i + 1), ms);
@@ -87,17 +84,19 @@ export default function Onboarding({ onDone }: Props) {
     <div className="niyora-onboarding" onClick={handleScreenClick} style={{ cursor: "pointer" }}>
       <div className="onboarding-backdrop" />
       <div className="onboarding-content">
-        {/* Top: dots showing progress */}
-        <div className="onboarding-dots">
-          {SLIDES.map((_, i) => (
-            <button
-              key={i}
-              className={`onboarding-dot ${i === index ? "is-current" : ""} ${i < index ? "is-passed" : ""}`}
-              onClick={(e) => { e.stopPropagation(); setIndex(i); }}
-              aria-label={`Slide ${i + 1}`}
-            />
-          ))}
-        </div>
+        {/* Progress dots only shown when there's more than one slide. */}
+        {SLIDES.length > 1 && (
+          <div className="onboarding-dots">
+            {SLIDES.map((_, i) => (
+              <button
+                key={i}
+                className={`onboarding-dot ${i === index ? "is-current" : ""} ${i < index ? "is-passed" : ""}`}
+                onClick={(e) => { e.stopPropagation(); setIndex(i); }}
+                aria-label={`Slide ${i + 1}`}
+              />
+            ))}
+          </div>
+        )}
 
         {/* Middle: the slide content. Keyed on index so React re-mounts
             and the fade-in animation re-plays each transition. */}

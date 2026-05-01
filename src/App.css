@@ -386,31 +386,66 @@ html, body, #root {
   color: rgba(255, 255, 255, 0.4);
 }
 .mood-question {
-  font-size: 18px;
+  font-size: 19px;
   font-weight: 400;
-  color: rgba(255, 255, 255, 0.9);
+  color: rgba(255, 255, 255, 0.92);
 }
 .mood-dots {
   display: flex;
   gap: 14px;
   margin-top: 4px;
+  align-items: flex-start;
+}
+.mood-dot-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
 }
 .mood-dot {
   width: 38px;
   height: 38px;
   border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.22);
   cursor: pointer;
-  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
   outline: none;
   padding: 0;
 }
-.mood-dot:hover:not(:disabled) {
-  transform: scale(1.15);
-  border-color: rgba(255, 255, 255, 0.6);
-  box-shadow: 0 0 18px rgba(255, 255, 255, 0.15);
+.mood-dot:hover {
+  transform: scale(1.18);
+  border-color: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 22px rgba(255, 255, 255, 0.22);
 }
-.mood-dot:disabled { opacity: 0.5; cursor: default; }
+.mood-dot-label {
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.5px;
+  color: rgba(255, 255, 255, 0.55);
+  text-transform: lowercase;
+}
+.mood-dot-wrap:hover .mood-dot-label {
+  color: rgba(255, 255, 255, 0.9);
+}
+.mood-thanks {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  animation: fadeSlideUp 0.5s ease-out both;
+  margin-top: 8px;
+}
+.mood-thanks-line {
+  font-size: 19px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.95);
+}
+.mood-thanks-sub {
+  font-size: 13px;
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.6);
+  letter-spacing: 0.5px;
+}
 .mood-dot-1 { background: hsla(30, 70%, 60%, 0.7); }
 .mood-dot-2 { background: hsla(20, 60%, 55%, 0.65); }
 .mood-dot-3 { background: hsla(335, 50%, 60%, 0.6); }
@@ -504,7 +539,7 @@ html, body, #root {
   margin-bottom: 4px;
 }
 .pss4-question {
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 400;
   line-height: 1.5;
   color: rgba(255, 255, 255, 0.95);
@@ -513,18 +548,18 @@ html, body, #root {
 .pss4-options {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 .pss4-option {
   width: 100%;
   text-align: left;
-  padding: 9px 14px;
+  padding: 11px 16px;
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.85);
+  color: rgba(255, 255, 255, 0.88);
   font-family: 'Poppins', sans-serif;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 400;
   cursor: pointer;
   outline: none;
@@ -554,6 +589,156 @@ html, body, #root {
   background: rgba(255, 255, 255, 0.06);
 }
 .pss4-skip:disabled { opacity: 0.4; cursor: default; }
+
+/* PSS-4 result screen */
+.pss4-result {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 36px 28px 28px;
+  gap: 10px;
+}
+.pss4-score-wrap {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 6px;
+}
+.pss4-score-num {
+  font-size: 56px;
+  font-weight: 200;
+  letter-spacing: 1px;
+  line-height: 1;
+}
+.pss4-score-out {
+  font-size: 12px;
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.45);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+.pss4-band {
+  font-size: 22px;
+  font-weight: 400;
+  margin-top: 4px;
+  letter-spacing: 0.5px;
+}
+.pss4-band-msg {
+  font-size: 14px;
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.78);
+  line-height: 1.5;
+  max-width: 280px;
+  margin-top: 2px;
+}
+.pss4-result-note {
+  font-size: 12px;
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.5);
+  line-height: 1.55;
+  max-width: 280px;
+  margin-top: 18px;
+}
+.pss4-result-btn {
+  margin-top: 22px;
+  padding: 9px 22px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.92);
+  font-family: 'Poppins', sans-serif;
+  font-size: 13px;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  outline: none;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+.pss4-result-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+/* First-session AHA screen */
+.niyora-aha {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 16px;
+  overflow: hidden;
+  font-family: 'Poppins', sans-serif;
+  color: rgba(255, 255, 255, 0.92);
+}
+.aha-backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% 30%, hsla(250, 60%, 38%, 0.7) 0%, transparent 60%),
+    radial-gradient(circle at 50% 90%, hsla(265, 50%, 22%, 0.55) 0%, transparent 60%),
+    rgba(8, 6, 18, 0.94);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+.aha-snow {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+.aha-content {
+  position: relative;
+  z-index: 2;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 36px 28px;
+  gap: 10px;
+  text-align: center;
+  animation: fadeSlideUp 0.7s ease-out both;
+}
+.aha-eyebrow {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+  margin-bottom: 6px;
+}
+.aha-headline {
+  font-size: 24px;
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.98);
+  letter-spacing: 0.5px;
+}
+.aha-sub {
+  font-size: 15px;
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.78);
+  line-height: 1.5;
+  max-width: 280px;
+}
+.aha-continue {
+  margin-top: 24px;
+  padding: 10px 26px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: rgba(255, 255, 255, 0.95);
+  font-family: 'Poppins', sans-serif;
+  font-size: 13px;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  outline: none;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+.aha-continue:hover {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.5);
+  transform: translateY(-1px);
+}
 
 /* ============================================================ */
 /* My Soul panel — replaces the old "Settings" today-only panel */
@@ -599,7 +784,7 @@ html, body, #root {
 .soul-close {
   position: absolute;
   top: 8px;
-  right: 8px;
+  left: 8px;
   width: 26px;
   height: 26px;
   display: flex;

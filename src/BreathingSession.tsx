@@ -1000,9 +1000,9 @@ export default function BreathingSession({ onComplete, snapshot, completedSessio
         ctx.fillStyle = `rgba(255, 245, 230, ${s.labelOpacity})`;
         ctx.fillText("well done", cx, HEIGHT * 0.70);
         if (doneT > 1.8) {
-          const subOp = Math.min((doneT - 1.8) * 0.8, 0.3);
+          const subOp = Math.min((doneT - 1.8) * 0.9, 0.75);
           const subFinal = doneT > 5.5 ? lerpVal(subOp, 0, (doneT - 5.5) * 2) : subOp;
-          ctx.font = "300 12px 'Poppins', sans-serif";
+          ctx.font = "300 13px 'Poppins', sans-serif";
           ctx.fillStyle = `rgba(255, 245, 230, ${Math.max(0, subFinal)})`;
           ctx.fillText("take this calm with you", cx, HEIGHT * 0.70 + 24);
         }
