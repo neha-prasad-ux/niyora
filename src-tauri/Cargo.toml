@@ -1,6 +1,6 @@
 [package]
 name = "niyora"
-version = "0.1.1"
+version = "0.1.2"
 description = "A macOS menu bar breathing exercise app"
 authors = ["Neha Prasad"]
 edition = "2021"
