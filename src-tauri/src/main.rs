@@ -7,6 +7,7 @@ mod onboarding;
 mod reminder;
 mod sessions;
 mod situational;
+mod updater;
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -85,6 +86,7 @@ fn main() {
         ])
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_nspanel::init())
         .plugin({
             // Global hotkey: Cmd+Option+Shift+N toggles the panel. The tray
@@ -131,6 +133,8 @@ fn main() {
                 MenuItemBuilder::with_id("show", "Show Niyora    ⌘⌥⇧N").build(app)?;
             let snooze_item =
                 MenuItemBuilder::with_id("snooze_1h", "Snooze for 1 hour").build(app)?;
+            let check_updates_item =
+                MenuItemBuilder::with_id("check_updates", "Check for Updates…").build(app)?;
             let quit_item = MenuItemBuilder::with_id("quit", "Quit Niyora").build(app)?;
             // Dev-only items: trigger a notification on demand and re-trigger
             // the onboarding flow. Both removed before App Store submission.
@@ -157,6 +161,8 @@ fn main() {
             }
             let menu = menu_builder
                 .item(&PredefinedMenuItem::separator(app)?)
+                .item(&check_updates_item)
+                .item(&PredefinedMenuItem::separator(app)?)
                 .item(&quit_item)
                 .build()?;
 
@@ -180,6 +186,9 @@ fn main() {
                             "snooze_started",
                             serde_json::json!({ "duration_minutes": 60 }),
                         );
+                    }
+                    "check_updates" => {
+                        updater::check(app.clone(), true);
                     }
                     "quit" => {
                         app.exit(0);
@@ -259,6 +268,17 @@ fn main() {
                     let _ = h;
                 });
             });
+
+            // Background update check (privacy-disclosed; see updater.rs).
+            // Delayed a few seconds so it never blocks tray-icon registration
+            // or first paint of the panel.
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_secs(5));
+                    updater::check(handle, false);
+                });
+            }
 
             // Start situational signal collectors (idle/screen-time + score loop)
             situational::start_all(situational.clone());

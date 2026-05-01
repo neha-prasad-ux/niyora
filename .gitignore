@@ -28,3 +28,6 @@ src-tauri/target/
 playwright-report/
 test-results/
 .vite/
+
+# Cloudflare wrangler local state
+.wrangler/
