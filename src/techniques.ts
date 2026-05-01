@@ -423,8 +423,16 @@ export function unlockedTechniques(completedSessions: number): Technique[] {
 
 /** Pick a random technique from the user's unlocked set.
  * Falls back to all techniques if completedSessions is unknown (e.g. backend
- * fetch failed) so the practice is never blocked. */
+ * fetch failed) so the practice is never blocked.
+ *
+ * First-session rule: every new user gets Box Breath as their very first
+ * practice. It's the most universally teachable technique and gives the
+ * onboarding a calm, predictable shape before randomization kicks in. */
 export function randomTechnique(completedSessions?: number): Technique {
+  if (completedSessions === 0) {
+    const box = breathingTechniques.find((t) => t.name === "Box Breath");
+    if (box) return box;
+  }
   const pool =
     completedSessions === undefined
       ? techniques

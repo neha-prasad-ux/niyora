@@ -6,12 +6,13 @@ import Settings from "./Settings";
 import PostSessionMood from "./PostSessionMood";
 import PssFour from "./PssFour";
 import Onboarding from "./Onboarding";
+import FirstSessionAha from "./FirstSessionAha";
 import { useSnapshot, synthesizeSnapshot } from "./useSnapshot";
 import { useSessionStats } from "./useSessionStats";
 import DevControls from "./DevControls";
 import "./App.css";
 
-type View = "main" | "settings" | "mood" | "pss4" | "onboarding";
+type View = "main" | "settings" | "mood" | "pss4" | "onboarding" | "first_session";
 
 function App() {
   const [view, setView] = useState<View>("main");
@@ -33,6 +34,26 @@ function App() {
     let unlisten: (() => void) | null = null;
     listen("onboarding_reset", () => {
       setNeedsOnboarding(true);
+    })
+      .then((u) => {
+        unlisten = u;
+      })
+      .catch(() => {
+        /* event plugin unavailable in dev preview */
+      });
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, []);
+
+  // Dev-only listener: when the tray fires "Reset sessions", bump openKey
+  // so useSessionStats refetches and the next session is treated as the
+  // first (Box Breath default + AHA screen).
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    listen("sessions_reset", () => {
+      setView("main");
+      setOpenKey((k) => k + 1);
     })
       .then((u) => {
         unlisten = u;
@@ -74,13 +95,14 @@ function App() {
   }, []);
 
   const handleSessionComplete = useCallback(async () => {
+    const wasFirst = stats.completed === 0;
     try {
       await invoke("log_event", { eventType: "session_completed", meta: {} });
     } catch {
       /* ignore */
     }
-    setView("mood");
-  }, []);
+    setView(wasFirst ? "first_session" : "mood");
+  }, [stats.completed]);
 
   const handleMoodDone = useCallback(async () => {
     await invoke("hide_panel");
@@ -95,6 +117,10 @@ function App() {
 
   if (view === "settings") {
     return <Settings onBack={() => setView("main")} onOpenPss4={() => setView("pss4")} />;
+  }
+
+  if (view === "first_session") {
+    return <FirstSessionAha onContinue={() => setView("mood")} />;
   }
 
   if (view === "mood") {

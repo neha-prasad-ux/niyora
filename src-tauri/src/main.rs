@@ -84,7 +84,26 @@ fn main() {
             onboarding::request_notification_permission,
         ])
         .plugin(tauri_plugin_positioner::init())
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_nspanel::init())
+        .plugin({
+            // Global hotkey: Cmd+Option+Shift+N toggles the panel. The tray
+            // icon can disappear behind notches or get pushed off when the
+            // menu bar is crowded; this gives users a guaranteed way in.
+            use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
+            let toggle_shortcut = Shortcut::new(
+                Some(Modifiers::SUPER | Modifiers::ALT | Modifiers::SHIFT),
+                Code::KeyN,
+            );
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(move |app, shortcut, event| {
+                    if shortcut == &toggle_shortcut && event.state() == ShortcutState::Pressed {
+                        #[cfg(target_os = "macos")]
+                        toggle_panel(app);
+                    }
+                })
+                .build()
+        })
         .setup(move |app| {
             // Hide from dock — menu bar only
             #[cfg(target_os = "macos")]
@@ -108,7 +127,8 @@ fn main() {
             //   "show"      -> Show Niyora (toggles the panel)
             //   "snooze_1h" -> Suppress reminders for the next 1 hour
             //   "quit"      -> Cleanly exit the app
-            let show_item = MenuItemBuilder::with_id("show", "Show Niyora").build(app)?;
+            let show_item =
+                MenuItemBuilder::with_id("show", "Show Niyora    ⌘⌥⇧N").build(app)?;
             let snooze_item =
                 MenuItemBuilder::with_id("snooze_1h", "Snooze for 1 hour").build(app)?;
             let quit_item = MenuItemBuilder::with_id("quit", "Quit Niyora").build(app)?;
@@ -120,6 +140,9 @@ fn main() {
             #[cfg(debug_assertions)]
             let reset_onboarding_item =
                 MenuItemBuilder::with_id("reset_onboarding", "Reset onboarding (dev)").build(app)?;
+            #[cfg(debug_assertions)]
+            let reset_sessions_item =
+                MenuItemBuilder::with_id("reset_sessions", "Reset sessions (dev)").build(app)?;
             let mut menu_builder = MenuBuilder::new(app)
                 .item(&show_item)
                 .item(&PredefinedMenuItem::separator(app)?)
@@ -129,7 +152,8 @@ fn main() {
                 menu_builder = menu_builder
                     .item(&PredefinedMenuItem::separator(app)?)
                     .item(&test_notif_item)
-                    .item(&reset_onboarding_item);
+                    .item(&reset_onboarding_item)
+                    .item(&reset_sessions_item);
             }
             let menu = menu_builder
                 .item(&PredefinedMenuItem::separator(app)?)
@@ -139,7 +163,7 @@ fn main() {
             TrayIconBuilder::with_id("tray")
                 .icon(tray_icon)
                 .icon_as_template(true)
-                .tooltip("Niyora — Breathe")
+                .tooltip("Niyora · Breathe (⌘⌥⇧N)")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id().as_ref() {
@@ -171,6 +195,14 @@ fn main() {
                         // onboarding flow on the very next interaction.
                         let _ = app.emit("onboarding_reset", ());
                     }
+                    #[cfg(debug_assertions)]
+                    "reset_sessions" => {
+                        let _ = sessions::reset_sessions();
+                        // Tell the frontend to refetch session stats so the
+                        // next session is treated as the first (Box Breath
+                        // default + AHA screen).
+                        let _ = app.emit("sessions_reset", ());
+                    }
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
@@ -194,6 +226,21 @@ fn main() {
                     }
                 })
                 .build(app)?;
+
+            // Register the global toggle shortcut. Same key combo as the
+            // plugin handler above (Cmd+Option+Shift+N). Failures are logged
+            // but non-fatal: the tray icon and notifications still work
+            // without a hotkey.
+            {
+                use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
+                let toggle_shortcut = Shortcut::new(
+                    Some(Modifiers::SUPER | Modifiers::ALT | Modifiers::SHIFT),
+                    Code::KeyN,
+                );
+                if let Err(e) = app.global_shortcut().register(toggle_shortcut) {
+                    eprintln!("global-shortcut register failed: {e}");
+                }
+            }
 
             // Listen for "open the panel from a notification" requests.
             // Fired by the notification action handler in reminder.rs.

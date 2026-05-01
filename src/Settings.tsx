@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useSnapshot, scoreToBallGradient } from "./useSnapshot";
 import { useSessionStats } from "./useSessionStats";
 import { TIERS, currentTier, nextTier, sessionsToNext, type Tier } from "./tiers";
@@ -133,9 +134,9 @@ export default function Settings({ onBack, onOpenPss4 }: Props) {
     <div className="niyora-soul">
       <div className="soul-backdrop" />
       <div className="soul-content">
-        <button className="soul-close" onClick={onBack} title="Close">
+        <button className="soul-close" onClick={onBack} title="Back" aria-label="Back">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M18 6L6 18M6 6l12 12" />
+            <path d="M19 12H5M12 19l-7-7 7-7" />
           </svg>
         </button>
 
@@ -246,15 +247,16 @@ export default function Settings({ onBack, onOpenPss4 }: Props) {
           <div className="soul-cta-blurb">
             Tell Neha what's working, what isn't, what you'd love next.
           </div>
-          <a className="soul-cta-btn" href="mailto:neha@niyora.com?subject=Niyora%20feedback">Write</a>
-        </div>
-
-        <div className="soul-card soul-card-cta is-placeholder">
-          <div className="soul-cta-title">Rate Niyora on the App Store</div>
-          <div className="soul-cta-blurb">
-            Available after launch. We'll link it here.
-          </div>
-          <button className="soul-cta-btn" disabled>Coming soon</button>
+          <button
+            className="soul-cta-btn"
+            onClick={() => {
+              openUrl("https://niyora.com/talk").catch(() => {
+                /* opener plugin unavailable; nothing useful to do */
+              });
+            }}
+          >
+            Open
+          </button>
         </div>
 
         <div className="soul-footer">
