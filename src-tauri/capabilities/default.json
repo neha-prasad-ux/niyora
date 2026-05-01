@@ -5,6 +5,7 @@
   "permissions": [
     "core:default",
     "positioner:default",
-    "global-shortcut:default"
+    "global-shortcut:default",
+    "opener:default"
   ]
 }

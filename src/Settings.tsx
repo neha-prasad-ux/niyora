@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useSnapshot, scoreToBallGradient } from "./useSnapshot";
 import { useSessionStats } from "./useSessionStats";
 import { TIERS, currentTier, nextTier, sessionsToNext, type Tier } from "./tiers";
@@ -246,14 +247,16 @@ export default function Settings({ onBack, onOpenPss4 }: Props) {
           <div className="soul-cta-blurb">
             Tell Neha what's working, what isn't, what you'd love next.
           </div>
-          <a
+          <button
             className="soul-cta-btn"
-            href="https://niyora.com/talk"
-            target="_blank"
-            rel="noopener noreferrer"
+            onClick={() => {
+              openUrl("https://niyora.com/talk").catch(() => {
+                /* opener plugin unavailable; nothing useful to do */
+              });
+            }}
           >
             Open
-          </a>
+          </button>
         </div>
 
         <div className="soul-footer">

@@ -84,6 +84,7 @@ fn main() {
             onboarding::request_notification_permission,
         ])
         .plugin(tauri_plugin_positioner::init())
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_nspanel::init())
         .plugin({
             // Global hotkey: Cmd+Option+Shift+N toggles the panel. The tray
