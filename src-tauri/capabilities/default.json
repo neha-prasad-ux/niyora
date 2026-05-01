@@ -6,6 +6,7 @@
     "core:default",
     "positioner:default",
     "global-shortcut:default",
-    "opener:default"
+    "opener:default",
+    "updater:default"
   ]
 }
