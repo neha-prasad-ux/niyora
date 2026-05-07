@@ -42,7 +42,13 @@
     ],
     "macOS": {
       "minimumSystemVersion": "10.15",
-      "signingIdentity": "Developer ID Application: Neha Neha (865S8DL9Y9)"
+      "signingIdentity": "Developer ID Application: Neha Neha (865S8DL9Y9)",
+      "dmg": {
+        "background": "dmg/background.tiff",
+        "windowSize": { "width": 660, "height": 400 },
+        "appPosition": { "x": 165, "y": 245 },
+        "applicationFolderPosition": { "x": 495, "y": 245 }
+      }
     }
   },
   "plugins": {

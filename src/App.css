@@ -1330,6 +1330,36 @@ html, body, #root {
   box-shadow: 0 4px 14px hsla(270, 50%, 40%, 0.2);
 }
 
+/* "I live up here" pointer on the first onboarding slide.
+   Anchors visually to the menu bar so users know where to find Niyora. */
+.onboarding-here {
+  position: absolute;
+  top: 8px;
+  right: 18px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  color: hsla(265, 65%, 80%, 0.85);
+  pointer-events: none;
+  animation: onboardingHerePulse 3.4s ease-in-out infinite;
+}
+.onboarding-here-arrow {
+  filter: drop-shadow(0 0 6px hsla(265, 70%, 60%, 0.45));
+}
+.onboarding-here-text {
+  font-family: 'Poppins', sans-serif;
+  font-size: 10px;
+  letter-spacing: 0.6px;
+  font-weight: 400;
+  color: hsla(265, 35%, 88%, 0.78);
+}
+@keyframes onboardingHerePulse {
+  0%, 100% { transform: translateY(0); opacity: 0.78; }
+  50%      { transform: translateY(-3px); opacity: 1; }
+}
+
 /* ============================================================ */
 /* Dev-only stress-tier preview controls                         */
 /* ============================================================ */
