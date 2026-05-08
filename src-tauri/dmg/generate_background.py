@@ -48,9 +48,9 @@ TEXT_PRIMARY = (248, 244, 252)
 TEXT_SECONDARY = (200, 196, 218)
 HAIRLINE = (130, 128, 158)
 
-APP_CENTER = (165, 245)
-APPS_CENTER = (495, 245)
+APP_CENTER = (330, 200)
 ICON_R = 64
+CAPTION_Y = 320
 
 
 FONTS_DIR = Path(__file__).resolve().parent / "fonts"
@@ -126,27 +126,6 @@ def _screen_blend(base: Image.Image, overlay: Image.Image, intensity: float) -> 
     return base
 
 
-def draw_ghost_apps_target(draw: ImageDraw.ImageDraw, center: tuple[int, int], r: int) -> None:
-    """Ghost outline of the Applications shortcut. Finder draws its own
-    label below the icon, so we leave the box plain."""
-    cx, cy = center
-    box = [cx - r, cy - r, cx + r, cy + r]
-    radius = int(r * 0.22)
-    draw.rounded_rectangle(box, radius=radius, outline=(110, 108, 138), width=1)
-
-
-def draw_arrow(draw: ImageDraw.ImageDraw, start: tuple[int, int], end: tuple[int, int]) -> None:
-    sx, sy = start
-    ex, ey = end
-    draw.line([(sx, sy), (ex, ey)], fill=HAIRLINE, width=1)
-    head = 8
-    angle = math.atan2(ey - sy, ex - sx)
-    a1 = angle + math.pi - math.pi / 7
-    a2 = angle + math.pi + math.pi / 7
-    draw.line([(ex, ey), (ex + head * math.cos(a1), ey + head * math.sin(a1))], fill=HAIRLINE, width=1)
-    draw.line([(ex, ey), (ex + head * math.cos(a2), ey + head * math.sin(a2))], fill=HAIRLINE, width=1)
-
-
 def render(scale: int) -> Image.Image:
     """Render the DMG background.
 
@@ -164,27 +143,18 @@ def render(scale: int) -> Image.Image:
     draw = ImageDraw.Draw(img)
 
     heading_font = find_sans_font(44 * scale, bold=True)
-    sub_font = find_sans_font(16 * scale)
+    caption_font = find_sans_font(16 * scale)
 
     heading = "Welcome"
-    sub = "Drag Niyora to Applications."
+    caption = "Double-click Niyora to begin."
 
     h_bbox = draw.textbbox((0, 0), heading, font=heading_font)
     hw = h_bbox[2] - h_bbox[0]
     draw.text(((WINDOW_W * scale - hw) / 2, 60 * scale), heading, font=heading_font, fill=TEXT_PRIMARY)
 
-    s_bbox = draw.textbbox((0, 0), sub, font=sub_font)
-    sw = s_bbox[2] - s_bbox[0]
-    draw.text(((WINDOW_W * scale - sw) / 2, 130 * scale), sub, font=sub_font, fill=TEXT_SECONDARY)
-
-    app_c = (APP_CENTER[0] * scale, APP_CENTER[1] * scale)
-    apps_c = (APPS_CENTER[0] * scale, APPS_CENTER[1] * scale)
-    r = ICON_R * scale
-    draw_ghost_apps_target(draw, apps_c, r)
-
-    arrow_start = (app_c[0] + r + 16 * scale, app_c[1])
-    arrow_end = (apps_c[0] - r - 16 * scale, apps_c[1])
-    draw_arrow(draw, arrow_start, arrow_end)
+    c_bbox = draw.textbbox((0, 0), caption, font=caption_font)
+    cw = c_bbox[2] - c_bbox[0]
+    draw.text(((WINDOW_W * scale - cw) / 2, CAPTION_Y * scale), caption, font=caption_font, fill=TEXT_SECONDARY)
 
     return img
 

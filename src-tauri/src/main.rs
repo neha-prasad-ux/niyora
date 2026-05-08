@@ -103,13 +103,21 @@ fn relocate_from_dmg_if_needed() {
 
     // Shell helper: pause briefly so this process exits cleanly first, kill
     // any pre-existing Niyora running from /Applications (so ditto can
-    // overwrite), copy, then launch from the new location.
+    // overwrite), copy, then launch from the new location. If any of those
+    // steps fail (locked /Applications on a managed Mac, disk full, etc.),
+    // surface a native dialog with manual instructions rather than failing
+    // silently — the user has just exited the source process and would
+    // otherwise see nothing happen.
     let script = format!(
         r#"sleep 0.4
 pkill -f "{target_str}/Contents/MacOS/" 2>/dev/null || true
 sleep 0.2
-rm -rf "{target_str}"
-/usr/bin/ditto "{src_str}" "{target_str}" && /usr/bin/open -n "{target_str}"
+if rm -rf "{target_str}" \
+  && /usr/bin/ditto "{src_str}" "{target_str}" \
+  && /usr/bin/open -n "{target_str}"; then
+    exit 0
+fi
+/usr/bin/osascript -e 'display dialog "Niyora could not move itself to your Applications folder. Open Finder, drag Niyora.app from the Niyora disk to your Applications folder, then open it from there." with title "Niyora" buttons {{"OK"}} default button 1 with icon caution'
 "#,
         target_str = target.to_string_lossy(),
         src_str = app_bundle.to_string_lossy(),
