@@ -428,8 +428,32 @@ fn main() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Niyora");
+        .build(tauri::generate_context!())
+        .expect("error while building Niyora")
+        .run(|app_handle, event| {
+            // When the user clicks Niyora.app from Finder or Spotlight while
+            // it is already running, macOS sends a "reopen" event. This is
+            // the recovery path for users who lost the tray icon to a full
+            // menu bar / notch overflow. We pop the panel so they have an
+            // immediate way back in, and toggle the tray's visibility so
+            // macOS gets a chance to re-place it where it can be seen.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = event {
+                if let Some(tray) = app_handle.tray_by_id("tray") {
+                    let _ = tray.set_visible(false);
+                    let _ = tray.set_visible(true);
+                }
+                let panel = app_handle.get_webview_panel("main").unwrap();
+                if !panel.is_visible() {
+                    toggle_panel(app_handle);
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = app_handle;
+                let _ = event;
+            }
+        });
 }
 
 /// Convert the main window into an NSPanel with proper menubar popover behavior.
