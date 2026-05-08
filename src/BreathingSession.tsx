@@ -521,6 +521,9 @@ export default function BreathingSession({ onComplete, snapshot, completedSessio
   const handleBegin = useCallback(() => {
     btnParticles.stopEmitting();
     setTransitioning(true);
+    // Tell Rust the session is active so click-outside-to-dismiss is
+    // suppressed until the session ends.
+    invoke("set_session_active", { active: true }).catch(() => {});
     // After animation completes, start the session
     setTimeout(() => {
       stateRef.current.waiting = false;
@@ -560,6 +563,8 @@ export default function BreathingSession({ onComplete, snapshot, completedSessio
     if (sessionInfoRef.current && !loggedRef.current) {
       logSession(false);
     }
+    // Session is over — re-enable click-outside-to-dismiss.
+    invoke("set_session_active", { active: false }).catch(() => {});
     // Fade out audio before closing
     const audio = audioRef.current;
     if (audio) {
@@ -573,8 +578,19 @@ export default function BreathingSession({ onComplete, snapshot, completedSessio
     await invoke("hide_panel");
   }, [logSession]);
 
-  // Background audio — fade in on mount, fade out on done
+  // Belt-and-suspenders: on unmount (e.g. session auto-advances to mood),
+  // make sure Rust knows the session is no longer active.
   useEffect(() => {
+    return () => {
+      invoke("set_session_active", { active: false }).catch(() => {});
+    };
+  }, []);
+
+  // Background audio — starts only after the user clicks Begin (so the panel
+  // can pop up silently and the user controls when the soundscape kicks in).
+  // Fades in on start, fades out on unmount.
+  useEffect(() => {
+    if (waiting) return;
     const track = AMBIENT_TRACKS[Math.floor(Math.random() * AMBIENT_TRACKS.length)];
     const audio = new Audio(track);
     audio.loop = true;
@@ -582,7 +598,6 @@ export default function BreathingSession({ onComplete, snapshot, completedSessio
     audioRef.current = audio;
     audio.play().catch(() => {}); // autoplay may be blocked
 
-    // Fade in over 2s
     let vol = 0;
     const fadeIn = setInterval(() => {
       vol = Math.min(vol + 0.02, 0.35);
@@ -592,7 +607,6 @@ export default function BreathingSession({ onComplete, snapshot, completedSessio
 
     return () => {
       clearInterval(fadeIn);
-      // Fade out over 1.5s
       let v = audio.volume;
       const fadeOut = setInterval(() => {
         v = Math.max(v - 0.03, 0);
@@ -600,7 +614,7 @@ export default function BreathingSession({ onComplete, snapshot, completedSessio
         if (v <= 0) { clearInterval(fadeOut); audio.pause(); }
       }, 50);
     };
-  }, []);
+  }, [waiting]);
 
 
   useEffect(() => {

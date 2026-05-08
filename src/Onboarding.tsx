@@ -83,6 +83,16 @@ export default function Onboarding({ onDone }: Props) {
   return (
     <div className="niyora-onboarding" onClick={handleScreenClick} style={{ cursor: "pointer" }}>
       <div className="onboarding-backdrop" />
+      {/* "I live here" pointer — shown only on the first slide so users can
+          see where to find Niyora later, without distracting once they're in. */}
+      {index === 0 && (
+        <div className="onboarding-here" aria-hidden="true">
+          <svg className="onboarding-here-arrow" width="16" height="20" viewBox="0 0 16 20" fill="none">
+            <path d="M8 2 L8 18 M8 2 L3 7 M8 2 L13 7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span className="onboarding-here-text">I live up here.</span>
+        </div>
+      )}
       <div className="onboarding-content">
         {/* Progress dots only shown when there's more than one slide. */}
         {SLIDES.length > 1 && (

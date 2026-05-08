@@ -25,6 +25,16 @@ use tauri::{
 /// plugin compute it after the window has been hidden/moved.
 struct TrayRect(Arc<Mutex<Option<(f64, f64, f64, f64)>>>);
 
+/// True while the user is mid breathing session. Used to suppress the
+/// click-outside-to-dismiss behavior so a stray click doesn't abort their
+/// 60-second practice. Set from the frontend on Begin / Done.
+struct SessionActive(Arc<Mutex<bool>>);
+
+#[tauri::command]
+fn set_session_active(active: bool, state: tauri::State<'_, SessionActive>) {
+    *state.0.lock().unwrap() = active;
+}
+
 use crate::reminder::{LastSessionTime, SnoozedUntil};
 use crate::situational::{SituationalState, SituationalStateHandle};
 
@@ -56,20 +66,113 @@ fn hide_panel(app_handle: tauri::AppHandle) {
     }
 }
 
+/// If the app is running from a mounted DMG (path under /Volumes/), spawn
+/// a detached helper that copies the bundle to /Applications and relaunches
+/// it from there, then exit immediately. Doing the copy synchronously here
+/// makes macOS Launch Services time out ("Niyora is not responding") because
+/// the app never gets a chance to register a run loop.
+///
+/// Skipped in debug builds so `pnpm tauri dev` from any working directory
+/// keeps working.
+#[cfg(target_os = "macos")]
+fn relocate_from_dmg_if_needed() {
+    if cfg!(debug_assertions) {
+        return;
+    }
+    let exe = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    if !exe.to_string_lossy().starts_with("/Volumes/") {
+        return;
+    }
+    // Walk up to find the .app bundle root. current_exe is at:
+    //   /Volumes/Niyora/Niyora.app/Contents/MacOS/niyora
+    let app_bundle = match exe
+        .ancestors()
+        .find(|p| p.extension().and_then(|s| s.to_str()) == Some("app"))
+    {
+        Some(p) => p.to_path_buf(),
+        None => return,
+    };
+    let app_name = match app_bundle.file_name().and_then(|s| s.to_str()) {
+        Some(n) => n.to_string(),
+        None => return,
+    };
+    let target = std::path::PathBuf::from("/Applications").join(&app_name);
+
+    // Shell helper: pause briefly so this process exits cleanly first, kill
+    // any pre-existing Niyora running from /Applications (so ditto can
+    // overwrite), copy, then launch from the new location. If any of those
+    // steps fail (locked /Applications on a managed Mac, disk full, etc.),
+    // surface a native dialog with manual instructions rather than failing
+    // silently — the user has just exited the source process and would
+    // otherwise see nothing happen.
+    let script = format!(
+        r#"sleep 0.4
+pkill -f "{target_str}/Contents/MacOS/" 2>/dev/null || true
+sleep 0.2
+if rm -rf "{target_str}" \
+  && /usr/bin/ditto "{src_str}" "{target_str}" \
+  && /usr/bin/open -n "{target_str}"; then
+    exit 0
+fi
+/usr/bin/osascript -e 'display dialog "Niyora could not move itself to your Applications folder. Open Finder, drag Niyora.app from the Niyora disk to your Applications folder, then open it from there." with title "Niyora" buttons {{"OK"}} default button 1 with icon caution'
+"#,
+        target_str = target.to_string_lossy(),
+        src_str = app_bundle.to_string_lossy(),
+    );
+    let _ = std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg(&script)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+
+    // Drop a marker so the relocated copy knows to show the welcome panel
+    // even if the user has already onboarded. Without this, a re-install
+    // looks like nothing happened — the tray icon was already there.
+    if let Some(dir) = config::app_data_dir() {
+        let _ = std::fs::write(dir.join(".show_panel_on_next_launch"), "1");
+    }
+
+    // Exit fast. The detached helper takes over from here.
+    std::process::exit(0);
+}
+
+#[cfg(target_os = "macos")]
+fn consume_show_panel_marker() -> bool {
+    let Some(dir) = config::app_data_dir() else { return false; };
+    let marker = dir.join(".show_panel_on_next_launch");
+    if marker.exists() {
+        let _ = std::fs::remove_file(&marker);
+        true
+    } else {
+        false
+    }
+}
+
 fn main() {
+    #[cfg(target_os = "macos")]
+    relocate_from_dmg_if_needed();
+
     let last_session = Arc::new(Mutex::new(Instant::now()));
     let situational = Arc::new(Mutex::new(SituationalState::new()));
     let snoozed: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
     let tray_rect: Arc<Mutex<Option<(f64, f64, f64, f64)>>> = Arc::new(Mutex::new(None));
+    let session_active: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
 
     tauri::Builder::default()
         .manage(LastSessionTime(last_session.clone()))
         .manage(SituationalStateHandle(situational.clone()))
         .manage(SnoozedUntil(snoozed.clone()))
         .manage(TrayRect(tray_rect.clone()))
+        .manage(SessionActive(session_active.clone()))
         .invoke_handler(tauri::generate_handler![
             hide_panel,
             resize_panel,
+            set_session_active,
             situational::get_situational_snapshot,
             analytics::log_event,
             analytics::should_show_pss4,
@@ -251,6 +354,32 @@ fn main() {
                 }
             }
 
+            // First-launch auto-open: if the user hasn't onboarded, surface
+            // the panel a moment after launch so they don't have to hunt
+            // for the menu-bar icon. The panel anchors under the tray
+            // icon when its rect is known, otherwise toggle_panel falls
+            // back to a top-right position near the menu bar so the visual
+            // connection still reads. Onboarding adds an explicit "I live
+            // up here" pointer.
+            // Auto-show the panel if the user hasn't onboarded, or if the app
+            // was just relocated from a DMG. The latter gives a clear visual
+            // confirmation that the install/re-install actually worked.
+            #[cfg(target_os = "macos")]
+            let just_relocated = consume_show_panel_marker();
+            #[cfg(not(target_os = "macos"))]
+            let just_relocated = false;
+            if !onboarding::is_onboarded() || just_relocated {
+                let handle_for_first_launch = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(900));
+                    let h = handle_for_first_launch.clone();
+                    let _ = handle_for_first_launch.run_on_main_thread(move || {
+                        #[cfg(target_os = "macos")]
+                        toggle_panel(&h);
+                    });
+                });
+            }
+
             // Listen for "open the panel from a notification" requests.
             // Fired by the notification action handler in reminder.rs.
             let app_handle_for_listen = app.handle().clone();
@@ -299,8 +428,32 @@ fn main() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Niyora");
+        .build(tauri::generate_context!())
+        .expect("error while building Niyora")
+        .run(|app_handle, event| {
+            // When the user clicks Niyora.app from Finder or Spotlight while
+            // it is already running, macOS sends a "reopen" event. This is
+            // the recovery path for users who lost the tray icon to a full
+            // menu bar / notch overflow. We pop the panel so they have an
+            // immediate way back in, and toggle the tray's visibility so
+            // macOS gets a chance to re-place it where it can be seen.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = event {
+                if let Some(tray) = app_handle.tray_by_id("tray") {
+                    let _ = tray.set_visible(false);
+                    let _ = tray.set_visible(true);
+                }
+                let panel = app_handle.get_webview_panel("main").unwrap();
+                if !panel.is_visible() {
+                    toggle_panel(app_handle);
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = app_handle;
+                let _ = event;
+            }
+        });
 }
 
 /// Convert the main window into an NSPanel with proper menubar popover behavior.
@@ -337,6 +490,20 @@ fn setup_panel(app_handle: &tauri::AppHandle) {
 
     let handle = app_handle.clone();
     app_handle.listen("panel_did_resign_key", move |_| {
+        // Stay sticky during onboarding (so a stray click can't lose the
+        // welcome screen) and during an active breathing session (so a
+        // stray click can't abort a 60-second practice). Otherwise honor
+        // the standard menu-bar app pattern of click-outside-to-dismiss.
+        if !onboarding::is_onboarded() {
+            return;
+        }
+        let active = handle
+            .try_state::<SessionActive>()
+            .map(|s| *s.0.lock().unwrap())
+            .unwrap_or(false);
+        if active {
+            return;
+        }
         let panel = handle.get_webview_panel("main").unwrap();
         if panel.is_visible() {
             panel.order_out(None);
@@ -378,7 +545,7 @@ fn toggle_panel(app_handle: &tauri::AppHandle) {
             .try_state::<TrayRect>()
             .and_then(|s| *s.0.lock().unwrap());
 
-        if let (Some((tx, _ty, tw, th)), Ok(Some(monitor))) = (tray, window.current_monitor()) {
+        if let Ok(Some(monitor)) = window.current_monitor() {
             let screen = monitor.size();
             let scale = monitor.scale_factor();
             let panel_w_logical: f64 = 420.0;
@@ -386,19 +553,28 @@ fn toggle_panel(app_handle: &tauri::AppHandle) {
             let screen_w = screen.width as f64;
             let edge_margin = 8.0 * scale;
 
-            // Center panel under tray icon, then clamp to screen edges.
-            let tray_center_x = tx + tw / 2.0;
-            let mut x_phys = tray_center_x - panel_w_phys / 2.0;
+            // Center panel under tray icon when its rect is known, otherwise
+            // fall back to top-right of the screen near where macOS places
+            // app tray icons. Used on first launch before any tray event
+            // has been dispatched.
+            let (mut x_phys, y_phys) = if let Some((tx, _ty, tw, th)) = tray {
+                let tray_center_x = tx + tw / 2.0;
+                let x = tray_center_x - panel_w_phys / 2.0;
+                let gap_phys = 4.0 * scale;
+                (x, th + gap_phys)
+            } else {
+                let menu_bar_phys = 24.0 * scale;
+                let gap_phys = 4.0 * scale;
+                let x = screen_w - panel_w_phys - edge_margin;
+                (x, menu_bar_phys + gap_phys)
+            };
+
             if x_phys + panel_w_phys + edge_margin > screen_w {
                 x_phys = screen_w - panel_w_phys - edge_margin;
             }
             if x_phys < edge_margin {
                 x_phys = edge_margin;
             }
-
-            // Panel top sits a few pixels below the tray icon's bottom.
-            let gap_phys = 4.0 * scale;
-            let y_phys = th + gap_phys; // tray rect is in screen coords starting at menu bar
 
             let _ = window.set_position(tauri::Position::Physical(
                 tauri::PhysicalPosition {
