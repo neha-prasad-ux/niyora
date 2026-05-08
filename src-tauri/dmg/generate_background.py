@@ -126,25 +126,9 @@ def _screen_blend(base: Image.Image, overlay: Image.Image, intensity: float) -> 
     return base
 
 
-def draw_ghost_app_target(draw: ImageDraw.ImageDraw, center: tuple[int, int], r: int) -> None:
-    cx, cy = center
-    box = [cx - r, cy - r, cx + r, cy + r]
-    for i, (alpha_r, alpha_g, alpha_b, a) in enumerate([(60, 58, 80, 32), (90, 88, 110, 64)]):
-        offset = i * 1
-        draw.ellipse([box[0] - offset, box[1] - offset, box[2] + offset, box[3] + offset],
-                     outline=(alpha_r, alpha_g, alpha_b), width=1)
-    label = "Niyora"
-    font = find_sans_font(13)
-    bbox = draw.textbbox((0, 0), label, font=font)
-    tw = bbox[2] - bbox[0]
-    draw.text((cx - tw / 2, cy + r + 14), label, font=font, fill=TEXT_SECONDARY)
-
-
 def draw_ghost_apps_target(draw: ImageDraw.ImageDraw, center: tuple[int, int], r: int) -> None:
-    """Ghost outline of the Applications shortcut. We don't draw a label
-    here because Finder renders the actual shortcut name underneath the
-    icon — drawing it on the bg image would double up.
-    """
+    """Ghost outline of the Applications shortcut. Finder draws its own
+    label below the icon, so we leave the box plain."""
     cx, cy = center
     box = [cx - r, cy - r, cx + r, cy + r]
     radius = int(r * 0.22)

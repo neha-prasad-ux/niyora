@@ -66,7 +66,70 @@ fn hide_panel(app_handle: tauri::AppHandle) {
     }
 }
 
+/// If the app is running from a mounted DMG (path under /Volumes/), spawn
+/// a detached helper that copies the bundle to /Applications and relaunches
+/// it from there, then exit immediately. Doing the copy synchronously here
+/// makes macOS Launch Services time out ("Niyora is not responding") because
+/// the app never gets a chance to register a run loop.
+///
+/// Skipped in debug builds so `pnpm tauri dev` from any working directory
+/// keeps working.
+#[cfg(target_os = "macos")]
+fn relocate_from_dmg_if_needed() {
+    if cfg!(debug_assertions) {
+        return;
+    }
+    let exe = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    if !exe.to_string_lossy().starts_with("/Volumes/") {
+        return;
+    }
+    // Walk up to find the .app bundle root. current_exe is at:
+    //   /Volumes/Niyora/Niyora.app/Contents/MacOS/niyora
+    let app_bundle = match exe
+        .ancestors()
+        .find(|p| p.extension().and_then(|s| s.to_str()) == Some("app"))
+    {
+        Some(p) => p.to_path_buf(),
+        None => return,
+    };
+    let app_name = match app_bundle.file_name().and_then(|s| s.to_str()) {
+        Some(n) => n.to_string(),
+        None => return,
+    };
+    let target = std::path::PathBuf::from("/Applications").join(&app_name);
+
+    // Shell helper: pause briefly so this process exits cleanly first, kill
+    // any pre-existing Niyora running from /Applications (so ditto can
+    // overwrite), copy, then launch from the new location.
+    let script = format!(
+        r#"sleep 0.4
+pkill -f "{target_str}/Contents/MacOS/" 2>/dev/null || true
+sleep 0.2
+rm -rf "{target_str}"
+/usr/bin/ditto "{src_str}" "{target_str}" && /usr/bin/open -n "{target_str}"
+"#,
+        target_str = target.to_string_lossy(),
+        src_str = app_bundle.to_string_lossy(),
+    );
+    let _ = std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg(&script)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+
+    // Exit fast. The detached helper takes over from here.
+    std::process::exit(0);
+}
+
 fn main() {
+    #[cfg(target_os = "macos")]
+    relocate_from_dmg_if_needed();
+
     let last_session = Arc::new(Mutex::new(Instant::now()));
     let situational = Arc::new(Mutex::new(SituationalState::new()));
     let snoozed: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
