@@ -122,8 +122,27 @@ rm -rf "{target_str}"
         .stderr(std::process::Stdio::null())
         .spawn();
 
+    // Drop a marker so the relocated copy knows to show the welcome panel
+    // even if the user has already onboarded. Without this, a re-install
+    // looks like nothing happened — the tray icon was already there.
+    if let Some(dir) = config::app_data_dir() {
+        let _ = std::fs::write(dir.join(".show_panel_on_next_launch"), "1");
+    }
+
     // Exit fast. The detached helper takes over from here.
     std::process::exit(0);
+}
+
+#[cfg(target_os = "macos")]
+fn consume_show_panel_marker() -> bool {
+    let Some(dir) = config::app_data_dir() else { return false; };
+    let marker = dir.join(".show_panel_on_next_launch");
+    if marker.exists() {
+        let _ = std::fs::remove_file(&marker);
+        true
+    } else {
+        false
+    }
 }
 
 fn main() {
@@ -334,7 +353,14 @@ fn main() {
             // back to a top-right position near the menu bar so the visual
             // connection still reads. Onboarding adds an explicit "I live
             // up here" pointer.
-            if !onboarding::is_onboarded() {
+            // Auto-show the panel if the user hasn't onboarded, or if the app
+            // was just relocated from a DMG. The latter gives a clear visual
+            // confirmation that the install/re-install actually worked.
+            #[cfg(target_os = "macos")]
+            let just_relocated = consume_show_panel_marker();
+            #[cfg(not(target_os = "macos"))]
+            let just_relocated = false;
+            if !onboarding::is_onboarded() || just_relocated {
                 let handle_for_first_launch = app.handle().clone();
                 std::thread::spawn(move || {
                     std::thread::sleep(Duration::from_millis(900));
