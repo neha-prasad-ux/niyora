@@ -463,7 +463,7 @@ fn main() {
                 let handle = app.handle().clone();
                 std::thread::spawn(move || {
                     std::thread::sleep(Duration::from_secs(5));
-                    updater::check(handle, false);
+                    updater::maybe_silent_check(handle);
                 });
             }
 
@@ -672,6 +672,11 @@ fn toggle_panel(app_handle: &tauri::AppHandle) {
     // Replaces the previous full-page reload, which caused a visible reflow
     // on every tray click.
     let _ = app_handle.emit("panel_did_show", ());
+
+    // Catches users who keep the tray app running for days/weeks; the launch
+    // check alone never fires for them. Internally throttled to 24h, so this
+    // is a cheap no-op on rapid panel toggles.
+    updater::maybe_silent_check(app_handle.clone());
 }
 
 #[cfg(not(target_os = "macos"))]

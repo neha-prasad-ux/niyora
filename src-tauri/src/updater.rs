@@ -6,15 +6,56 @@
 // No telemetry or analytics is attached to the request.
 //
 // Behavior:
-// - On launch, `check(app, false)` is called once. If a new version is found,
-//   the user gets a notification with "Update now" / "Later". No notification
-//   is shown if they're already on the latest version.
+// - `maybe_silent_check` runs at launch and on every panel open, throttled to
+//   at most once per 24h. If a new version is found we silently download and
+//   swap the bundle on disk. The running process stays on the old binary; the
+//   user picks up the new version next time they launch. No notification, no
+//   forced restart.
 // - The "Check for Updates…" tray menu item calls `check(app, true)`, which
-//   additionally shows a "You're up to date" notification when there is no
-//   update available — so the user gets immediate feedback for a manual click.
+//   prompts with "Update now" / "Later" and surfaces a "You're up to date"
+//   notification when there's nothing new — explicit feedback for an explicit
+//   user action.
+
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use tauri::AppHandle;
 use tauri_plugin_updater::UpdaterExt;
+
+const SILENT_CHECK_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
+static LAST_SILENT_CHECK: Mutex<Option<Instant>> = Mutex::new(None);
+
+pub fn maybe_silent_check(app: AppHandle) {
+    {
+        let mut last = LAST_SILENT_CHECK.lock().unwrap();
+        if let Some(t) = *last {
+            if t.elapsed() < SILENT_CHECK_INTERVAL {
+                return;
+            }
+        }
+        *last = Some(Instant::now());
+    }
+
+    tauri::async_runtime::spawn(async move {
+        let updater = match app.updater() {
+            Ok(u) => u,
+            Err(e) => {
+                eprintln!("updater init failed: {e}");
+                return;
+            }
+        };
+
+        match updater.check().await {
+            Ok(Some(update)) => {
+                if let Err(e) = update.download_and_install(|_, _| {}, || {}).await {
+                    eprintln!("silent update install failed: {e}");
+                }
+            }
+            Ok(None) => {}
+            Err(e) => eprintln!("silent update check failed: {e}"),
+        }
+    });
+}
 
 pub fn check(app: AppHandle, prompt_when_current: bool) {
     tauri::async_runtime::spawn(async move {
