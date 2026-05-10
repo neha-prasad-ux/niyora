@@ -217,9 +217,137 @@ jobs:
         run: |
           security delete-keychain "$RUNNER_TEMP/build.keychain-db" || true
 
+  release-windows:
+    name: Build Windows installer (NSIS, unsigned for v1)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build NSIS installer (Tauri bundler)
+        env:
+          # Tauri updater signing key — same key as macOS, used here to sign
+          # the .nsis.zip updater bundle so the in-app updater accepts it.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        # --bundles nsis skips MSI (would need WiX) and any other targets.
+        run: pnpm tauri build --target x86_64-pc-windows-msvc --bundles nsis
+
+      - name: Stage canonically named release files
+        id: stage
+        shell: bash
+        run: |
+          set -eo pipefail
+          NSIS_DIR="src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis"
+          REF="${GITHUB_REF_NAME#v}"
+          [ -z "$REF" ] && REF="$(git rev-parse --short HEAD)"
+
+          STAGED="release-files"
+          mkdir -p "$STAGED"
+
+          EXE_SRC=$(find "$NSIS_DIR" -maxdepth 1 -name '*-setup.exe' | head -1)
+          ZIP_SRC=$(find "$NSIS_DIR" -maxdepth 1 -name '*-setup.nsis.zip' | head -1)
+          SIG_SRC=$(find "$NSIS_DIR" -maxdepth 1 -name '*-setup.nsis.zip.sig' | head -1)
+
+          EXE_DEST="$STAGED/Niyora-${REF}-Windows-x64.exe"
+          ZIP_DEST="$STAGED/Niyora-${REF}-Windows-x64.nsis.zip"
+          SIG_DEST="$STAGED/Niyora-${REF}-Windows-x64.nsis.zip.sig"
+
+          cp "$EXE_SRC" "$EXE_DEST"
+          cp "$ZIP_SRC" "$ZIP_DEST"
+          cp "$SIG_SRC" "$SIG_DEST"
+
+          {
+            echo "version=$REF"
+            echo "exe=$(basename "$EXE_DEST")"
+            echo "zip=$(basename "$ZIP_DEST")"
+            echo "sig=$(basename "$SIG_DEST")"
+            echo "sig_path=$SIG_DEST"
+            echo "platform=windows-x86_64"
+          } >> "$GITHUB_OUTPUT"
+
+          ls -la "$STAGED"
+
+      - name: Install wrangler
+        run: npm install -g wrangler
+
+      - name: Upload installer and updater bundle to Cloudflare R2
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -eo pipefail
+          BUCKET="niyora-downloads"
+          EXE="release-files/${{ steps.stage.outputs.exe }}"
+          ZIP="release-files/${{ steps.stage.outputs.zip }}"
+          SIG="release-files/${{ steps.stage.outputs.sig }}"
+
+          wrangler r2 object put "$BUCKET/${{ steps.stage.outputs.exe }}" \
+            --file "$EXE" \
+            --content-type "application/vnd.microsoft.portable-executable" \
+            --remote
+
+          wrangler r2 object put "$BUCKET/${{ steps.stage.outputs.zip }}" \
+            --file "$ZIP" \
+            --content-type "application/zip" \
+            --remote
+
+          wrangler r2 object put "$BUCKET/${{ steps.stage.outputs.sig }}" \
+            --file "$SIG" \
+            --content-type "text/plain" \
+            --remote
+
+      - name: Emit updater metadata for the publish job
+        shell: bash
+        run: |
+          set -eo pipefail
+          mkdir -p updater-meta
+          cat > "updater-meta/windows-x86_64.json" <<EOF
+          {
+            "platform": "${{ steps.stage.outputs.platform }}",
+            "version": "${{ steps.stage.outputs.version }}",
+            "zip": "${{ steps.stage.outputs.zip }}",
+            "sig_file": "${{ steps.stage.outputs.sig }}",
+            "signature_inline": "$(cat "${{ steps.stage.outputs.sig_path }}" | tr -d '\n' | sed 's/"/\\"/g')"
+          }
+          EOF
+          cat "updater-meta/windows-x86_64.json"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: niyora-windows-x86_64
+          path: |
+            release-files/*.exe
+            release-files/*.nsis.zip
+            release-files/*.nsis.zip.sig
+            updater-meta/*.json
+          if-no-files-found: error
+
   publish:
     name: Publish GitHub Release + latest.json
-    needs: release
+    needs: [release, release-windows]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
@@ -230,14 +358,18 @@ jobs:
         with:
           path: artifacts
 
-      - name: Collect DMGs and updater files
+      - name: Collect installers and updater files
         run: |
           set -eo pipefail
           mkdir -p release-files
-          # Pull canonically named DMGs and updater bundles produced by the matrix
+          # Pull canonically named installers and updater bundles produced
+          # by the mac matrix and the Windows job.
           find artifacts -name 'Niyora-*-*.dmg' -exec cp {} release-files/ \;
           find artifacts -name 'Niyora-*-*.app.tar.gz' -exec cp {} release-files/ \;
           find artifacts -name 'Niyora-*-*.app.tar.gz.sig' -exec cp {} release-files/ \;
+          find artifacts -name 'Niyora-*-*.exe' -exec cp {} release-files/ \;
+          find artifacts -name 'Niyora-*-*.nsis.zip' -exec cp {} release-files/ \;
+          find artifacts -name 'Niyora-*-*.nsis.zip.sig' -exec cp {} release-files/ \;
           ls -la release-files
 
       - name: Build latest.json (Tauri updater manifest)
@@ -248,15 +380,17 @@ jobs:
 
           ARM_SIG_FILE=$(find release-files -name "Niyora-${REF}-AppleSilicon.app.tar.gz.sig" | head -1)
           INTEL_SIG_FILE=$(find release-files -name "Niyora-${REF}-Intel.app.tar.gz.sig" | head -1)
+          WIN_SIG_FILE=$(find release-files -name "Niyora-${REF}-Windows-x64.nsis.zip.sig" | head -1)
 
-          if [ -z "$ARM_SIG_FILE" ] || [ -z "$INTEL_SIG_FILE" ]; then
-            echo "Missing signature files. ARM=$ARM_SIG_FILE INTEL=$INTEL_SIG_FILE"
+          if [ -z "$ARM_SIG_FILE" ] || [ -z "$INTEL_SIG_FILE" ] || [ -z "$WIN_SIG_FILE" ]; then
+            echo "Missing signature files. ARM=$ARM_SIG_FILE INTEL=$INTEL_SIG_FILE WIN=$WIN_SIG_FILE"
             ls release-files
             exit 1
           fi
 
           ARM_SIG=$(cat "$ARM_SIG_FILE")
           INTEL_SIG=$(cat "$INTEL_SIG_FILE")
+          WIN_SIG=$(cat "$WIN_SIG_FILE")
           PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
           # Notes: pull the tag's release notes if available; fallback to a generic line.
@@ -270,13 +404,16 @@ jobs:
             --arg arm_sig "$ARM_SIG" \
             --arg intel_url "https://downloads.niyora.com/Niyora-${REF}-Intel.app.tar.gz" \
             --arg intel_sig "$INTEL_SIG" \
+            --arg win_url "https://downloads.niyora.com/Niyora-${REF}-Windows-x64.nsis.zip" \
+            --arg win_sig "$WIN_SIG" \
             '{
               version: $version,
               notes: $notes,
               pub_date: $pub_date,
               platforms: {
                 "darwin-aarch64": { signature: $arm_sig, url: $arm_url },
-                "darwin-x86_64":  { signature: $intel_sig, url: $intel_url }
+                "darwin-x86_64":  { signature: $intel_sig, url: $intel_url },
+                "windows-x86_64": { signature: $win_sig, url: $win_url }
               }
             }' > release-files/latest.json
 
@@ -304,4 +441,5 @@ jobs:
           generate_release_notes: true
           files: |
             release-files/*.dmg
+            release-files/*.exe
             release-files/latest.json

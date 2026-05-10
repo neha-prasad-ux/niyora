@@ -49,6 +49,13 @@
         "appPosition": { "x": 330, "y": 200 },
         "applicationFolderPosition": { "x": 1200, "y": 200 }
       }
+    },
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "installMode": "currentUser",
+        "displayLanguageSelector": false
+      }
     }
   },
   "plugins": {
