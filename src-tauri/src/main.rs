@@ -240,18 +240,22 @@ fn main() {
 
     builder
         .plugin({
-            // Global hotkey: Cmd+Option+Shift+N toggles the panel. The tray
-            // icon can disappear behind notches or get pushed off when the
-            // menu bar is crowded; this gives users a guaranteed way in.
+            // Global hotkey: toggles the panel. The tray icon can disappear
+            // behind notches or get pushed off when the menu bar is crowded;
+            // this gives users a guaranteed way in. macOS uses Cmd+Opt+Shift+N
+            // (SUPER on this OS = Cmd); Windows uses Ctrl+Alt+Shift+N.
             use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
+            #[cfg(target_os = "macos")]
+            let primary_mod = Modifiers::SUPER;
+            #[cfg(not(target_os = "macos"))]
+            let primary_mod = Modifiers::CONTROL;
             let toggle_shortcut = Shortcut::new(
-                Some(Modifiers::SUPER | Modifiers::ALT | Modifiers::SHIFT),
+                Some(primary_mod | Modifiers::ALT | Modifiers::SHIFT),
                 Code::KeyN,
             );
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(move |app, shortcut, event| {
                     if shortcut == &toggle_shortcut && event.state() == ShortcutState::Pressed {
-                        #[cfg(target_os = "macos")]
                         toggle_panel(app);
                     }
                 })
@@ -271,12 +275,22 @@ fn main() {
             #[cfg(target_os = "macos")]
             setup_panel(app.handle());
 
-            // Build the tray icon. The body PNG (ring + nucleus only) is set
-            // as a template so macOS auto-tints it per-pixel against the
-            // local menu-bar background — same path the Wi-Fi, battery, and
-            // clock icons take. The coloured electron is composited on top
-            // by `tray_mac::apply_state` once the tray is up.
+            // Build the tray icon.
+            //
+            // macOS: the body PNG (ring + nucleus only) is set as a template
+            // so macOS auto-tints it per-pixel against the local menu-bar
+            // background, same path the Wi-Fi, battery, and clock icons take.
+            // The coloured electron is composited on top by
+            // `tray_mac::apply_state` once the tray is up.
+            //
+            // Windows: no template-tint pipeline, so we use the solid app
+            // icon directly. State visualization (measuring vs reminder) is
+            // deferred to a future version; v1 uses a single static icon.
+            #[cfg(target_os = "macos")]
             let tray_icon = Image::from_bytes(include_bytes!("../icons/tray-body.png"))
+                .expect("failed to load tray icon");
+            #[cfg(not(target_os = "macos"))]
+            let tray_icon = Image::from_bytes(include_bytes!("../icons/32x32.png"))
                 .expect("failed to load tray icon");
 
             // Tray right-click menu. To add items: extend the MenuBuilder chain below
@@ -284,8 +298,11 @@ fn main() {
             //   "show"      -> Show Niyora (toggles the panel)
             //   "snooze_1h" -> Suppress reminders for the next 1 hour
             //   "quit"      -> Cleanly exit the app
-            let show_item =
-                MenuItemBuilder::with_id("show", "Show Niyora    ⌘⌥⇧N").build(app)?;
+            #[cfg(target_os = "macos")]
+            let show_label = "Show Niyora    ⌘⌥⇧N";
+            #[cfg(not(target_os = "macos"))]
+            let show_label = "Show Niyora    Ctrl+Alt+Shift+N";
+            let show_item = MenuItemBuilder::with_id("show", show_label).build(app)?;
             let snooze_item =
                 MenuItemBuilder::with_id("snooze_1h", "Snooze for 1 hour").build(app)?;
             let check_updates_item =
@@ -321,15 +338,19 @@ fn main() {
                 .item(&quit_item)
                 .build()?;
 
+            #[cfg(target_os = "macos")]
+            let tooltip_text = "Niyora · Breathe (⌘⌥⇧N)";
+            #[cfg(not(target_os = "macos"))]
+            let tooltip_text = "Niyora · Breathe (Ctrl+Alt+Shift+N)";
+
             TrayIconBuilder::with_id("tray")
                 .icon(tray_icon)
                 .icon_as_template(true)
-                .tooltip("Niyora · Breathe (⌘⌥⇧N)")
+                .tooltip(tooltip_text)
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "show" => {
-                        #[cfg(target_os = "macos")]
                         toggle_panel(app);
                     }
                     "snooze_1h" => {
@@ -393,13 +414,16 @@ fn main() {
                 .build(app)?;
 
             // Register the global toggle shortcut. Same key combo as the
-            // plugin handler above (Cmd+Option+Shift+N). Failures are logged
-            // but non-fatal: the tray icon and notifications still work
-            // without a hotkey.
+            // plugin handler above. Failures are logged but non-fatal: the
+            // tray icon and notifications still work without a hotkey.
             {
                 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
+                #[cfg(target_os = "macos")]
+                let primary_mod = Modifiers::SUPER;
+                #[cfg(not(target_os = "macos"))]
+                let primary_mod = Modifiers::CONTROL;
                 let toggle_shortcut = Shortcut::new(
-                    Some(Modifiers::SUPER | Modifiers::ALT | Modifiers::SHIFT),
+                    Some(primary_mod | Modifiers::ALT | Modifiers::SHIFT),
                     Code::KeyN,
                 );
                 if let Err(e) = app.global_shortcut().register(toggle_shortcut) {
