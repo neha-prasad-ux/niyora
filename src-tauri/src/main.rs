@@ -746,7 +746,7 @@ fn toggle_panel(app_handle: &tauri::AppHandle) {
 /// Windows toggle: show the main window anchored adjacent to the tray icon,
 /// or hide it if visible. Tauri's tray-icon plugin captures the tray rect on
 /// click events via `tauri_plugin_positioner`, so we reuse the same approach
-/// as macOS — anchor in screen coordinates rather than letting the positioner
+/// as macOS: anchor in screen coordinates rather than letting the positioner
 /// re-compute after the window has been hidden/moved.
 #[cfg(not(target_os = "macos"))]
 fn toggle_panel(app_handle: &tauri::AppHandle) {

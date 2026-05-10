@@ -84,7 +84,7 @@ fn prompt_user(app: &AppHandle, update: tauri_plugin_updater::Update) {
     });
 }
 
-/// Windows prompt: plain toast without inline buttons (no Update/Later — see
+/// Windows prompt: plain toast without inline buttons (no Update/Later, see
 /// project memory). v1 gap: there is no in-app install trigger yet, so the
 /// toast is informational only. v1.1 will add an in-panel "Install update"
 /// button that calls `install` from the frontend.

@@ -120,7 +120,7 @@ pub fn fire_test_notification(app: tauri::AppHandle) {
 
 /// Show a reminder notification. macOS uses mac-notification-sys directly so
 /// the banner carries inline action buttons ("Breathe now" / "Snooze 30 min");
-/// Windows uses a plain toast (no inline buttons — see project memory).
+/// Windows uses a plain toast (no inline buttons, see project memory).
 ///
 /// macOS spawns a worker thread to wait for the user's response so the reminder
 /// loop is never blocked. Windows fires-and-forgets; the amber tray icon stays
