@@ -25,22 +25,39 @@ pub fn reset_onboarded() -> Result<(), String> {
     config::save(&cfg)
 }
 
-/// Triggers the macOS notification permission dialog by attempting to send
-/// a quiet welcome notification. macOS surfaces its own native "Allow / Don't
-/// Allow" popup the first time an app tries to notify; subsequent calls are
-/// silently allowed or denied based on the user's choice.
+/// Triggers the platform's notification permission dialog by attempting to
+/// send a quiet welcome notification.
+///
+/// macOS surfaces its own native "Allow / Don't Allow" popup the first time
+/// an app tries to notify; subsequent calls are silently allowed or denied
+/// based on the user's choice.
+///
+/// Windows: installed desktop apps typically have notification permission
+/// auto-granted via the AppUserModelID registered by the NSIS installer.
+/// We still fire the welcome toast so the user sees confirmation that
+/// reminders will appear.
 #[tauri::command]
-pub fn request_notification_permission() -> Result<(), String> {
+pub fn request_notification_permission(app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         use mac_notification_sys::Notification;
-        // Fire-and-forget — we only care about prompting the OS dialog.
+        let _ = &app;
         std::thread::spawn(|| {
             let _ = Notification::new()
                 .title("Niyora")
                 .message("You're all set. We'll nudge you when you need a break.")
                 .send();
         });
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        use tauri_plugin_notification::NotificationExt;
+        let _ = app
+            .notification()
+            .builder()
+            .title("Niyora")
+            .body("You're all set. We'll nudge you when you need a break.")
+            .show();
     }
     Ok(())
 }

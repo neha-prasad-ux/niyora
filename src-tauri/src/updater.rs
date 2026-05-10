@@ -32,13 +32,14 @@ pub fn check(app: AppHandle, prompt_when_current: bool) {
             }
             Ok(None) => {
                 if prompt_when_current {
-                    show_simple("Niyora is up to date.", "");
+                    show_simple(&app, "Niyora is up to date.", "");
                 }
             }
             Err(e) => {
                 eprintln!("update check failed: {e}");
                 if prompt_when_current {
                     show_simple(
+                        &app,
                         "Could not check for updates.",
                         "Check your internet connection and try again.",
                     );
@@ -83,22 +84,38 @@ fn prompt_user(app: &AppHandle, update: tauri_plugin_updater::Update) {
     });
 }
 
+/// Windows prompt: plain toast without inline buttons (no Update/Later — see
+/// project memory). v1 gap: there is no in-app install trigger yet, so the
+/// toast is informational only. v1.1 will add an in-panel "Install update"
+/// button that calls `install` from the frontend.
 #[cfg(not(target_os = "macos"))]
-fn prompt_user(_: &AppHandle, _: tauri_plugin_updater::Update) {}
+fn prompt_user(app: &AppHandle, update: tauri_plugin_updater::Update) {
+    use tauri_plugin_notification::NotificationExt;
+    let title = format!("Niyora {} is available", update.version);
+    let body = if !update.body.clone().unwrap_or_default().trim().is_empty() {
+        update.body.clone().unwrap_or_default()
+    } else {
+        "Open Niyora to install. (Auto-update from a toast is coming soon.)".to_string()
+    };
+    let _ = app
+        .notification()
+        .builder()
+        .title(&title)
+        .body(&body)
+        .show();
+}
 
 fn install(app: AppHandle, update: tauri_plugin_updater::Update) {
     tauri::async_runtime::spawn(async move {
         match update.download_and_install(|_, _| {}, || {}).await {
             Ok(_) => {
-                show_simple(
-                    "Niyora updated. Relaunching…",
-                    "",
-                );
+                show_simple(&app, "Niyora updated. Relaunching…", "");
                 app.restart();
             }
             Err(e) => {
                 eprintln!("update install failed: {e}");
                 show_simple(
+                    &app,
                     "Update failed.",
                     "Please download the latest version from niyora.com.",
                 );
@@ -108,7 +125,7 @@ fn install(app: AppHandle, update: tauri_plugin_updater::Update) {
 }
 
 #[cfg(target_os = "macos")]
-fn show_simple(title: &str, body: &str) {
+fn show_simple(_app: &AppHandle, title: &str, body: &str) {
     let _ = mac_notification_sys::Notification::new()
         .title(title)
         .message(body)
@@ -116,4 +133,12 @@ fn show_simple(title: &str, body: &str) {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn show_simple(_: &str, _: &str) {}
+fn show_simple(app: &AppHandle, title: &str, body: &str) {
+    use tauri_plugin_notification::NotificationExt;
+    let _ = app
+        .notification()
+        .builder()
+        .title(title)
+        .body(body)
+        .show();
+}

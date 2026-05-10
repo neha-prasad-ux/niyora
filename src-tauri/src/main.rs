@@ -248,7 +248,8 @@ fn main() {
         ])
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_updater::Builder::new().build());
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_notification::init());
 
     #[cfg(target_os = "macos")]
     let builder = builder.plugin(tauri_nspanel::init());
