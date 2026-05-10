@@ -12,6 +12,9 @@
 
 #![cfg(target_os = "macos")]
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+
 use cocoa::base::{id, nil, NO, YES};
 use cocoa::foundation::{NSRect, NSSize, NSString};
 use objc::runtime::{Sel, BOOL};
@@ -134,12 +137,80 @@ unsafe fn remove_existing_electron(button: id) {
     }
 }
 
-fn electron_bytes(state: TrayState) -> (&'static [u8], &'static [u8]) {
+/// Number of frames in the attention loop. Must match `ANIM_FRAMES` in
+/// scripts/generate_tray_icons.py — both sides are checked into the repo so
+/// regenerating the assets is a manual step.
+pub const ANIM_FRAMES: usize = 24;
+
+/// 1x PNGs for the measuring-state attention sweep, frame 0..ANIM_FRAMES-1.
+/// Frame 0 sits at the resting angle, so the loop starts and ends in the
+/// same pose as the static `tray-electron-measuring.png`.
+const FRAMES_MEASURING_1X: [&[u8]; ANIM_FRAMES] = [
+    include_bytes!("../icons/tray-electron-measuring-f00.png"),
+    include_bytes!("../icons/tray-electron-measuring-f01.png"),
+    include_bytes!("../icons/tray-electron-measuring-f02.png"),
+    include_bytes!("../icons/tray-electron-measuring-f03.png"),
+    include_bytes!("../icons/tray-electron-measuring-f04.png"),
+    include_bytes!("../icons/tray-electron-measuring-f05.png"),
+    include_bytes!("../icons/tray-electron-measuring-f06.png"),
+    include_bytes!("../icons/tray-electron-measuring-f07.png"),
+    include_bytes!("../icons/tray-electron-measuring-f08.png"),
+    include_bytes!("../icons/tray-electron-measuring-f09.png"),
+    include_bytes!("../icons/tray-electron-measuring-f10.png"),
+    include_bytes!("../icons/tray-electron-measuring-f11.png"),
+    include_bytes!("../icons/tray-electron-measuring-f12.png"),
+    include_bytes!("../icons/tray-electron-measuring-f13.png"),
+    include_bytes!("../icons/tray-electron-measuring-f14.png"),
+    include_bytes!("../icons/tray-electron-measuring-f15.png"),
+    include_bytes!("../icons/tray-electron-measuring-f16.png"),
+    include_bytes!("../icons/tray-electron-measuring-f17.png"),
+    include_bytes!("../icons/tray-electron-measuring-f18.png"),
+    include_bytes!("../icons/tray-electron-measuring-f19.png"),
+    include_bytes!("../icons/tray-electron-measuring-f20.png"),
+    include_bytes!("../icons/tray-electron-measuring-f21.png"),
+    include_bytes!("../icons/tray-electron-measuring-f22.png"),
+    include_bytes!("../icons/tray-electron-measuring-f23.png"),
+];
+
+const FRAMES_MEASURING_2X: [&[u8]; ANIM_FRAMES] = [
+    include_bytes!("../icons/tray-electron-measuring-f00@2x.png"),
+    include_bytes!("../icons/tray-electron-measuring-f01@2x.png"),
+    include_bytes!("../icons/tray-electron-measuring-f02@2x.png"),
+    include_bytes!("../icons/tray-electron-measuring-f03@2x.png"),
+    include_bytes!("../icons/tray-electron-measuring-f04@2x.png"),
+    include_bytes!("../icons/tray-electron-measuring-f05@2x.png"),
+    include_bytes!("../icons/tray-electron-measuring-f06@2x.png"),
+    include_bytes!("../icons/tray-electron-measuring-f07@2x.png"),
+    include_bytes!("../icons/tray-electron-measuring-f08@2x.png"),
+    include_bytes!("../icons/tray-electron-measuring-f09@2x.png"),
+    include_bytes!("../icons/tray-electron-measuring-f10@2x.png"),
+    include_bytes!("../icons/tray-electron-measuring-f11@2x.png"),
+    include_bytes!("../icons/tray-electron-measuring-f12@2x.png"),
+    include_bytes!("../icons/tray-electron-measuring-f13@2x.png"),
+    include_bytes!("../icons/tray-electron-measuring-f14@2x.png"),
+    include_bytes!("../icons/tray-electron-measuring-f15@2x.png"),
+    include_bytes!("../icons/tray-electron-measuring-f16@2x.png"),
+    include_bytes!("../icons/tray-electron-measuring-f17@2x.png"),
+    include_bytes!("../icons/tray-electron-measuring-f18@2x.png"),
+    include_bytes!("../icons/tray-electron-measuring-f19@2x.png"),
+    include_bytes!("../icons/tray-electron-measuring-f20@2x.png"),
+    include_bytes!("../icons/tray-electron-measuring-f21@2x.png"),
+    include_bytes!("../icons/tray-electron-measuring-f22@2x.png"),
+    include_bytes!("../icons/tray-electron-measuring-f23@2x.png"),
+];
+
+fn electron_bytes(state: TrayState, frame: Option<usize>) -> (&'static [u8], &'static [u8]) {
     match state {
-        TrayState::Measuring => (
-            include_bytes!("../icons/tray-electron-measuring.png"),
-            include_bytes!("../icons/tray-electron-measuring@2x.png"),
-        ),
+        TrayState::Measuring => match frame {
+            Some(i) => {
+                let i = i % ANIM_FRAMES;
+                (FRAMES_MEASURING_1X[i], FRAMES_MEASURING_2X[i])
+            }
+            None => (
+                include_bytes!("../icons/tray-electron-measuring.png"),
+                include_bytes!("../icons/tray-electron-measuring@2x.png"),
+            ),
+        },
         TrayState::Reminder => (
             include_bytes!("../icons/tray-electron-reminder.png"),
             include_bytes!("../icons/tray-electron-reminder@2x.png"),
@@ -151,7 +222,12 @@ fn electron_bytes(state: TrayState) -> (&'static [u8], &'static [u8]) {
 /// status-bar button. Safe to call repeatedly; old subviews are cleaned up.
 /// Must be called on the main thread. Silently no-ops if the status item
 /// can't be found yet (e.g. first call races the tray builder).
-pub fn apply_state(state: TrayState) {
+///
+/// `frame = None` paints the resting electron for the given state.
+/// `frame = Some(i)` paints the i-th animation frame of the measuring
+/// sweep (used by `run_attention_animation`); the reminder state has no
+/// per-frame variants and falls back to its resting electron.
+pub fn apply_state(state: TrayState, frame: Option<usize>) {
     unsafe {
         let Some(item) = find_status_item() else { return };
         let button: id = msg_send![item, button];
@@ -161,7 +237,7 @@ pub fn apply_state(state: TrayState) {
 
         remove_existing_electron(button);
 
-        let (b1, b2) = electron_bytes(state);
+        let (b1, b2) = electron_bytes(state, frame);
         let image = make_multires_nsimage(b1, b2);
         if image == nil {
             return;
@@ -186,4 +262,38 @@ pub fn apply_state(state: TrayState) {
 
         let _: () = msg_send![button, addSubview: view];
     }
+}
+
+/// Guards `run_attention_animation` against being kicked twice if the
+/// first-launch path fires more than once (e.g. relocate marker + missing
+/// onboarding flag). Cheaper and simpler than threading a stop-channel
+/// since the loop is bounded by `ATTENTION_DURATION`.
+static ATTENTION_RUNNING: AtomicBool = AtomicBool::new(false);
+
+const FRAME_INTERVAL: Duration = Duration::from_millis(80);
+const ATTENTION_DURATION: Duration = Duration::from_secs(6);
+
+/// Spin the measuring-state electron around the ring for ~6 seconds to
+/// draw the user's eye to the menu-bar icon during onboarding. Settles on
+/// the resting frame when finished. Re-entrancy is a silent no-op.
+pub fn run_attention_animation(app: tauri::AppHandle) {
+    if ATTENTION_RUNNING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    std::thread::spawn(move || {
+        let total_frames =
+            (ATTENTION_DURATION.as_millis() / FRAME_INTERVAL.as_millis()) as usize;
+        for i in 0..total_frames {
+            let frame = i % ANIM_FRAMES;
+            let _ = app.run_on_main_thread(move || {
+                apply_state(TrayState::Measuring, Some(frame));
+            });
+            std::thread::sleep(FRAME_INTERVAL);
+        }
+        let _ = app.run_on_main_thread(|| {
+            apply_state(TrayState::Measuring, None);
+        });
+        ATTENTION_RUNNING.store(false, Ordering::SeqCst);
+    });
 }

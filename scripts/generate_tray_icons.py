@@ -21,6 +21,12 @@ States produced for the electron:
     measuring  -> green  (default running state, "we're watching")
     reminder   -> amber  (notification fired, "time to breathe")
 
+For the `measuring` state we additionally emit 24 frames with the electron
+swept around the ring (angle = ELECTRON_ANGLE_DEG + 360*i/24). The Rust
+side cycles them every ~80ms during first-launch onboarding to draw the
+user's eye to the menu bar; frame 0 sits at the resting angle so the
+animation starts and ends in the static pose.
+
 Each layer is rendered at 22x22 (1x) and 44x44 (2x) and written to
 src-tauri/icons/.
 
@@ -60,6 +66,10 @@ NUCLEUS_RADIUS_FRAC   = 0.20
 ELECTRON_RADIUS_FRAC  = 0.11
 ELECTRON_ANGLE_DEG    = 215.0   # 0 = +x; 215 = upper-left
 
+# Number of animation frames swept around the ring for the attention loop.
+# Must match `ANIM_FRAMES` in src-tauri/src/tray_mac.rs.
+ANIM_FRAMES = 24
+
 
 SIZES = [
     ("",     22),
@@ -72,6 +82,7 @@ class IconSpec:
     kind: str           # "body" or "electron-{state}"
     suffix: str         # "" or "@2x"
     size: int
+    angle_deg: float = ELECTRON_ANGLE_DEG
 
 
 def render(spec: IconSpec) -> Image.Image:
@@ -103,7 +114,7 @@ def render(spec: IconSpec) -> Image.Image:
     elif spec.kind.startswith("electron-"):
         state = spec.kind.split("-", 1)[1]
         color = ELECTRON_RGB[state] + (255,)
-        theta = math.radians(ELECTRON_ANGLE_DEG)
+        theta = math.radians(spec.angle_deg)
         ex = cx + ring_r * math.cos(theta)
         ey = cy + ring_r * math.sin(theta)
         draw.ellipse(
@@ -130,6 +141,23 @@ def main() -> None:
             spec = IconSpec(kind=kind, suffix=suffix, size=size)
             img = render(spec)
             name = f"tray-{kind}{suffix}.png"
+            path = os.path.join(ICONS_DIR, name)
+            img.save(path, format="PNG")
+            written.append(name)
+
+    # Animation frames for the `measuring` state. Frame 0 sits at the
+    # resting angle so the static icon and the loop's start/end align.
+    for i in range(ANIM_FRAMES):
+        angle = ELECTRON_ANGLE_DEG + 360.0 * i / ANIM_FRAMES
+        for suffix, size in SIZES:
+            spec = IconSpec(
+                kind="electron-measuring",
+                suffix=suffix,
+                size=size,
+                angle_deg=angle,
+            )
+            img = render(spec)
+            name = f"tray-electron-measuring-f{i:02d}{suffix}.png"
             path = os.path.join(ICONS_DIR, name)
             img.save(path, format="PNG")
             written.append(name)

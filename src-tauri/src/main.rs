@@ -68,7 +68,7 @@ pub(crate) fn set_tray_state(app: &tauri::AppHandle, state: TrayState) {
     {
         let h = app.clone();
         let _ = app.run_on_main_thread(move || {
-            tray_mac::apply_state(state);
+            tray_mac::apply_state(state, None);
             // Hint to the reader: `h` is here so the closure owns an
             // AppHandle clone, matching the run_on_main_thread signature
             // used elsewhere in this file.
@@ -417,7 +417,8 @@ fn main() {
             let just_relocated = consume_show_panel_marker();
             #[cfg(not(target_os = "macos"))]
             let just_relocated = false;
-            if !onboarding::is_onboarded() || just_relocated {
+            let needs_onboarding = !onboarding::is_onboarded();
+            if needs_onboarding || just_relocated {
                 let handle_for_first_launch = app.handle().clone();
                 std::thread::spawn(move || {
                     std::thread::sleep(Duration::from_millis(900));
@@ -426,6 +427,14 @@ fn main() {
                         #[cfg(target_os = "macos")]
                         toggle_panel(&h);
                     });
+                    // Spin the tray electron for a few seconds so a first-time
+                    // user's eye lands on the menu-bar icon, not just the
+                    // panel. Skipped on plain DMG re-installs (the panel is
+                    // pop-up enough on its own).
+                    #[cfg(target_os = "macos")]
+                    if needs_onboarding {
+                        tray_mac::run_attention_animation(handle_for_first_launch);
+                    }
                 });
             }
 
@@ -470,7 +479,7 @@ fn main() {
                 std::thread::spawn(move || {
                     std::thread::sleep(Duration::from_millis(500));
                     let _ = app_handle.run_on_main_thread(|| {
-                        tray_mac::apply_state(TrayState::Measuring);
+                        tray_mac::apply_state(TrayState::Measuring, None);
                     });
                 });
             }
