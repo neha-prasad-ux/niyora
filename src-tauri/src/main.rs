@@ -7,6 +7,8 @@ mod onboarding;
 mod reminder;
 mod sessions;
 mod situational;
+#[cfg(target_os = "macos")]
+mod tray_mac;
 mod updater;
 
 use std::sync::{Arc, Mutex};
@@ -33,6 +35,46 @@ struct SessionActive(Arc<Mutex<bool>>);
 #[tauri::command]
 fn set_session_active(active: bool, state: tauri::State<'_, SessionActive>) {
     *state.0.lock().unwrap() = active;
+}
+
+/// Visual state of the menu-bar icon.
+///
+/// `Measuring` is the default while the app is running: a green electron on
+/// the atom signals "we're watching your screen-time signals." `Reminder`
+/// swaps to an amber electron when a notification has fired and the user
+/// hasn't acted on it yet; clicking the panel, snoozing, or accepting the
+/// notification returns the icon to `Measuring`.
+///
+/// The icon is rendered as two layers: a monochrome template body (ring +
+/// nucleus) that macOS auto-tints per-pixel against whatever's behind it on
+/// the menu bar, and a coloured electron NSImageView composited on top.
+/// See `tray_mac.rs` for the AppKit plumbing.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TrayState {
+    Measuring,
+    Reminder,
+}
+
+/// The current tray state, kept in app-managed state so background callers
+/// (e.g. `reminder.rs`) can transition without holding their own copy.
+pub(crate) struct CurrentTrayState(pub Arc<Mutex<TrayState>>);
+
+pub(crate) fn set_tray_state(app: &tauri::AppHandle, state: TrayState) {
+    if let Some(s) = app.try_state::<CurrentTrayState>() {
+        *s.0.lock().unwrap() = state;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let h = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            tray_mac::apply_state(state, None);
+            // Hint to the reader: `h` is here so the closure owns an
+            // AppHandle clone, matching the run_on_main_thread signature
+            // used elsewhere in this file.
+            let _ = h;
+        });
+    }
 }
 
 use crate::reminder::{LastSessionTime, SnoozedUntil};
@@ -162,6 +204,7 @@ fn main() {
     let snoozed: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
     let tray_rect: Arc<Mutex<Option<(f64, f64, f64, f64)>>> = Arc::new(Mutex::new(None));
     let session_active: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
+    let current_tray_state: Arc<Mutex<TrayState>> = Arc::new(Mutex::new(TrayState::Measuring));
 
     tauri::Builder::default()
         .manage(LastSessionTime(last_session.clone()))
@@ -169,6 +212,7 @@ fn main() {
         .manage(SnoozedUntil(snoozed.clone()))
         .manage(TrayRect(tray_rect.clone()))
         .manage(SessionActive(session_active.clone()))
+        .manage(CurrentTrayState(current_tray_state.clone()))
         .invoke_handler(tauri::generate_handler![
             hide_panel,
             resize_panel,
@@ -223,8 +267,12 @@ fn main() {
             #[cfg(target_os = "macos")]
             setup_panel(app.handle());
 
-            // Build the tray icon
-            let tray_icon = Image::from_bytes(include_bytes!("../icons/tray.png"))
+            // Build the tray icon. The body PNG (ring + nucleus only) is set
+            // as a template so macOS auto-tints it per-pixel against the
+            // local menu-bar background — same path the Wi-Fi, battery, and
+            // clock icons take. The coloured electron is composited on top
+            // by `tray_mac::apply_state` once the tray is up.
+            let tray_icon = Image::from_bytes(include_bytes!("../icons/tray-body.png"))
                 .expect("failed to load tray icon");
 
             // Tray right-click menu. To add items: extend the MenuBuilder chain below
@@ -289,6 +337,7 @@ fn main() {
                             "snooze_started",
                             serde_json::json!({ "duration_minutes": 60 }),
                         );
+                        set_tray_state(app, TrayState::Measuring);
                     }
                     "check_updates" => {
                         updater::check(app.clone(), true);
@@ -368,7 +417,8 @@ fn main() {
             let just_relocated = consume_show_panel_marker();
             #[cfg(not(target_os = "macos"))]
             let just_relocated = false;
-            if !onboarding::is_onboarded() || just_relocated {
+            let needs_onboarding = !onboarding::is_onboarded();
+            if needs_onboarding || just_relocated {
                 let handle_for_first_launch = app.handle().clone();
                 std::thread::spawn(move || {
                     std::thread::sleep(Duration::from_millis(900));
@@ -377,6 +427,14 @@ fn main() {
                         #[cfg(target_os = "macos")]
                         toggle_panel(&h);
                     });
+                    // Spin the tray electron for a few seconds so a first-time
+                    // user's eye lands on the menu-bar icon, not just the
+                    // panel. Skipped on plain DMG re-installs (the panel is
+                    // pop-up enough on its own).
+                    #[cfg(target_os = "macos")]
+                    if needs_onboarding {
+                        tray_mac::run_attention_animation(handle_for_first_launch);
+                    }
                 });
             }
 
@@ -406,6 +464,23 @@ fn main() {
                 std::thread::spawn(move || {
                     std::thread::sleep(Duration::from_secs(5));
                     updater::check(handle, false);
+                });
+            }
+
+            // Composite the coloured electron over the template body. We
+            // wait briefly so the NSStatusItem is fully wired up — the
+            // tray builder finishes synchronously above, but the underlying
+            // status-item button isn't always immediately discoverable via
+            // `_statusItems`. Re-apply on every state change happens via
+            // `set_tray_state` from then on.
+            #[cfg(target_os = "macos")]
+            {
+                let app_handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(500));
+                    let _ = app_handle.run_on_main_thread(|| {
+                        tray_mac::apply_state(TrayState::Measuring, None);
+                    });
                 });
             }
 
@@ -587,6 +662,11 @@ fn toggle_panel(app_handle: &tauri::AppHandle) {
 
     std::thread::sleep(std::time::Duration::from_millis(50));
     panel.show();
+
+    // Any path that opens the panel counts as the user acknowledging an
+    // outstanding reminder, so revert the tray icon to Measuring. Cheap
+    // no-op if it was already Measuring.
+    set_tray_state(app_handle, TrayState::Measuring);
 
     // Tell the React app to reset its session state for this open.
     // Replaces the previous full-page reload, which caused a visible reflow

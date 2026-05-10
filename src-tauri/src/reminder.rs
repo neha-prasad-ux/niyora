@@ -124,6 +124,11 @@ pub fn fire_test_notification(app: tauri::AppHandle) {
 fn fire_notification(app: tauri::AppHandle) {
     let body = pick_body().to_string();
 
+    // Switch the menu-bar icon to the amber-electron "Reminder" state so
+    // the tray gives the same nudge as the notification, even if the user
+    // dismisses the banner before reading it.
+    crate::set_tray_state(&app, crate::TrayState::Reminder);
+
     std::thread::spawn(move || {
         #[cfg(target_os = "macos")]
         {
@@ -138,7 +143,10 @@ fn fire_notification(app: tauri::AppHandle) {
 
             let response = match response {
                 Ok(r) => r,
-                Err(_) => return,
+                Err(_) => {
+                    crate::set_tray_state(&app, crate::TrayState::Measuring);
+                    return;
+                }
             };
 
             match response {
@@ -150,6 +158,10 @@ fn fire_notification(app: tauri::AppHandle) {
                 }
                 _ => {}
             }
+
+            // Any response (action, snooze, dismiss) means the user has
+            // seen the nudge — drop the amber tray back to green.
+            crate::set_tray_state(&app, crate::TrayState::Measuring);
         }
 
         #[cfg(not(target_os = "macos"))]
@@ -183,6 +195,7 @@ fn apply_snooze_30min(app: &tauri::AppHandle) {
 /// Frontend-callable; menu uses the same SnoozedUntil state directly.
 #[tauri::command]
 pub fn snooze_for_minutes(
+    app: tauri::AppHandle,
     minutes: u64,
     state: tauri::State<'_, SnoozedUntil>,
 ) -> Result<(), String> {
@@ -192,6 +205,7 @@ pub fn snooze_for_minutes(
         "snooze_started",
         json!({ "duration_minutes": minutes }),
     );
+    crate::set_tray_state(&app, crate::TrayState::Measuring);
     Ok(())
 }
 
