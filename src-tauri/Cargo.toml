@@ -9,7 +9,12 @@ edition = "2021"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "image-png"] }
+# `macos-private-api` stays in the base feature set (not target-conditional):
+# tauri-build validates Cargo.toml's [dependencies] against tauri.conf.json's
+# `macOSPrivateApi: true` flag and does not see features unioned in from a
+# target-conditional block. The feature is a no-op on non-macOS targets, it
+# only gates internal API surface.
+tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
 tauri-plugin-positioner = { version = "2", features = ["tray-icon"] }
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-opener = "2"
@@ -20,7 +25,6 @@ chrono = "0.4"
 dirs = "6"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-tauri = { version = "2", features = ["macos-private-api"] }
 tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2" }
 cocoa = "0.26"
 objc = "0.2"
