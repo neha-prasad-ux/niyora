@@ -206,7 +206,7 @@ fn main() {
     let session_active: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
     let current_tray_state: Arc<Mutex<TrayState>> = Arc::new(Mutex::new(TrayState::Measuring));
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .manage(LastSessionTime(last_session.clone()))
         .manage(SituationalStateHandle(situational.clone()))
         .manage(SnoozedUntil(snoozed.clone()))
@@ -233,8 +233,12 @@ fn main() {
         ])
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_nspanel::init())
+        .plugin(tauri_plugin_updater::Builder::new().build());
+
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_nspanel::init());
+
+    builder
         .plugin({
             // Global hotkey: Cmd+Option+Shift+N toggles the panel. The tray
             // icon can disappear behind notches or get pushed off when the
