@@ -349,6 +349,11 @@ interface AnimState {
   done: boolean; doneTime: number;
   bgColor: [number, number, number]; targetBgColor: [number, number, number];
   labelOpacity: number; nameOpacity: number; subtitleOpacity: number;
+  // Cross-fade between phase labels (Inhale -> Hold -> Exhale...).
+  // labelT advances 0 -> 1 across LABEL_FADE_MS; while < 1, the previous
+  // label is drawn at (1 - labelT) and the current at labelT, so swaps
+  // never read as a hard cut.
+  shownLabel: string; prevLabel: string; labelT: number;
 }
 
 function createState(w: number, h: number, completedSessions?: number): AnimState {
@@ -363,6 +368,7 @@ function createState(w: number, h: number, completedSessions?: number): AnimStat
     done: false, doneTime: 0,
     bgColor: [260, 15, 11], targetBgColor: [260, 15, 11],
     labelOpacity: 0, nameOpacity: 0, subtitleOpacity: 0,
+    shownLabel: "", prevLabel: "", labelT: 1,
   };
 }
 
@@ -645,6 +651,9 @@ export default function BreathingSession({ onComplete, snapshot, completedSessio
     fresh.doneTime = prev.doneTime;
     fresh.bgColor = prev.bgColor;
     fresh.targetBgColor = prev.targetBgColor;
+    fresh.shownLabel = prev.shownLabel;
+    fresh.prevLabel = prev.prevLabel;
+    fresh.labelT = prev.labelT;
     stateRef.current = fresh;
 
     let lastTime = performance.now();
@@ -1037,13 +1046,46 @@ export default function BreathingSession({ onComplete, snapshot, completedSessio
           ctx.fillText(line, cx, HEIGHT * 0.86 + i * 16);
         });
       } else {
-        // Breathing phase label
+        // Breathing phase label. The current step (Inhale / Hold / Exhale)
+        // glows from its own letters via canvas shadowBlur so the active
+        // cue reads as "lit up" without any shape sitting behind it. On
+        // phase change, the new label cross-fades in over LABEL_FADE_S
+        // while the old one fades out.
         s.labelOpacity = lerpVal(s.labelOpacity, 0.9, dt * 3);
+
+        const LABEL_FADE_S = 0.28;
+        if (currentLabel !== s.shownLabel) {
+          s.prevLabel = s.shownLabel;
+          s.shownLabel = currentLabel;
+          s.labelT = 0;
+        }
+        if (s.labelT < 1) {
+          s.labelT = Math.min(1, s.labelT + dt / LABEL_FADE_S);
+        }
+        // Symmetric ease so neither side dominates the swap moment.
+        const tEased = s.labelT < 0.5
+          ? 2 * s.labelT * s.labelT
+          : 1 - Math.pow(-2 * s.labelT + 2, 2) / 2;
+
         ctx.font = "500 15px 'Poppins', sans-serif";
-        ctx.fillStyle = `rgba(255, 255, 255, ${s.labelOpacity})`;
-        ctx.fillText(currentLabel, cx, HEIGHT * 0.72);
-        // Persistent technique instruction below the phase label.
-        // Stays visible the whole session so users never have to remember.
+        const labelY = HEIGHT * 0.72;
+
+        ctx.save();
+        ctx.shadowColor = `rgba(255, 245, 235, ${s.labelOpacity * 0.55})`;
+        ctx.shadowBlur = 14;
+
+        if (s.labelT < 1 && s.prevLabel) {
+          ctx.fillStyle = `rgba(255, 255, 255, ${s.labelOpacity * (1 - tEased)})`;
+          ctx.fillText(s.prevLabel, cx, labelY);
+        }
+        ctx.fillStyle = `rgba(255, 255, 255, ${s.labelOpacity * tEased})`;
+        ctx.fillText(s.shownLabel, cx, labelY);
+        ctx.restore();
+
+        // Persistent technique instruction below the active word.
+        // Stays visible the whole session so users never have to
+        // remember the rhythm. Drawn without a shadow so it reads as
+        // recipe text, not as another "active" element.
         ctx.font = "400 12px 'Poppins', sans-serif";
         ctx.fillStyle = `rgba(255, 255, 255, ${s.labelOpacity * 0.9})`;
         const instructionLines = wrapText(ctx, technique.instructions, WIDTH - 60);

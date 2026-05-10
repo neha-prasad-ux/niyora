@@ -12,7 +12,6 @@ Living doc. User feedback queued for triage. Score impact (1 low, 5 high) and ef
 | 4 | Visual hierarchy in session text | Onboarding observation | 4 | 1 | Heading = current action (e.g. "Inhale"), smaller text below = what's next ("then hold"). Add "breathe through your nose" cue. Copy + layout in `BreathingSession.tsx`. |
 | 5 | App findable in tray (icon hidden when menu bar full) | Onboarding observation | 5 | 2 | Pair with #6, #7. Global hotkey + clearer icon. |
 | 6 | Auto-open panel on first launch + "where I live" walkthrough | Onboarding observation | 5 | 2 | One-time onboarding pointer to the tray icon. |
-| 7 | Visible "Niyora is active" indicator | User feedback | 4 | 2 | Subtle tray-icon pulse animation. Triggers: (a) ~5s pulse at app launch / day start, (b) pulse on reminder fire until dismissed, (c) slow breath-synced pulse during session, (d) static when idle. macOS template icon, no colour. |
 | 8 | Music selection + delayed playback | User request | 3 | 2 | Dropdown icon in session UI to pick a track or "Random". Selection persists. Music starts only after user clicks Begin (not on panel open). |
 | 9 | Background update checks (tray app rarely relaunched) | Self-identified | 4 | 2 | Periodic manifest check (every 24h while running) + silent download. Install applies on next natural launch. No banner, no forced restart. |
 
@@ -26,3 +25,5 @@ Living doc. User feedback queued for triage. Score impact (1 low, 5 high) and ef
 ## Later / parked
 
 (Move items here once decided against for now, with a one-line reason.)
+
+- **Tray-icon pulse animation** (was #7). Replaced by the 6-second spinning electron shipped in #14. Pulse pattern dropped in favour of a one-shot attention sweep on first launch.
