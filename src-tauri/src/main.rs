@@ -255,6 +255,22 @@ fn main() {
     #[cfg(not(target_os = "macos"))]
     let builder = builder.manage(LastTrayToggle(last_tray_toggle.clone()));
 
+    // Windows: collapse a second launch (re-running the .exe while we're
+    // already running) into a focus of the existing instance. macOS handles
+    // this natively via the Reopen event in the run loop below.
+    #[cfg(target_os = "windows")]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(
+        |app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                if window.is_visible().unwrap_or(false) {
+                    let _ = window.set_focus();
+                } else {
+                    toggle_panel(app);
+                }
+            }
+        },
+    ));
+
     builder
         .plugin({
             // Global hotkey: toggles the panel. The tray icon can disappear
