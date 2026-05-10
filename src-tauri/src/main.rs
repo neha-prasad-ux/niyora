@@ -206,7 +206,7 @@ fn main() {
     let session_active: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
     let current_tray_state: Arc<Mutex<TrayState>> = Arc::new(Mutex::new(TrayState::Measuring));
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .manage(LastSessionTime(last_session.clone()))
         .manage(SituationalStateHandle(situational.clone()))
         .manage(SnoozedUntil(snoozed.clone()))
@@ -233,8 +233,12 @@ fn main() {
         ])
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_nspanel::init())
+        .plugin(tauri_plugin_updater::Builder::new().build());
+
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_nspanel::init());
+
+    builder
         .plugin({
             // Global hotkey: Cmd+Option+Shift+N toggles the panel. The tray
             // icon can disappear behind notches or get pushed off when the
@@ -247,7 +251,6 @@ fn main() {
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(move |app, shortcut, event| {
                     if shortcut == &toggle_shortcut && event.state() == ShortcutState::Pressed {
-                        #[cfg(target_os = "macos")]
                         toggle_panel(app);
                     }
                 })
@@ -325,7 +328,6 @@ fn main() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "show" => {
-                        #[cfg(target_os = "macos")]
                         toggle_panel(app);
                     }
                     "snooze_1h" => {
@@ -424,7 +426,6 @@ fn main() {
                     std::thread::sleep(Duration::from_millis(900));
                     let h = handle_for_first_launch.clone();
                     let _ = handle_for_first_launch.run_on_main_thread(move || {
-                        #[cfg(target_os = "macos")]
                         toggle_panel(&h);
                     });
                     // Spin the tray electron for a few seconds so a first-time
@@ -452,7 +453,13 @@ fn main() {
                         }
                     }
                     #[cfg(not(target_os = "macos"))]
-                    let _ = h;
+                    {
+                        if let Some(window) = h.get_webview_window("main") {
+                            if !window.is_visible().unwrap_or(false) {
+                                toggle_panel(&h);
+                            }
+                        }
+                    }
                 });
             });
 
@@ -674,5 +681,26 @@ fn toggle_panel(app_handle: &tauri::AppHandle) {
     let _ = app_handle.emit("panel_did_show", ());
 }
 
+/// Windows skeleton: show or hide the main window. Positioning, focus, and
+/// click-outside-to-dismiss behaviour will be filled in once the basic flow
+/// is working end-to-end. This is intentionally minimal.
 #[cfg(not(target_os = "macos"))]
-fn toggle_panel(_app_handle: &tauri::AppHandle) {}
+fn toggle_panel(app_handle: &tauri::AppHandle) {
+    use tauri_plugin_positioner::{Position, WindowExt};
+
+    let Some(window) = app_handle.get_webview_window("main") else {
+        return;
+    };
+
+    if window.is_visible().unwrap_or(false) {
+        let _ = window.hide();
+        return;
+    }
+
+    let _ = window.move_window(Position::TrayCenter);
+    let _ = window.show();
+    let _ = window.set_focus();
+
+    set_tray_state(app_handle, TrayState::Measuring);
+    let _ = app_handle.emit("panel_did_show", ());
+}

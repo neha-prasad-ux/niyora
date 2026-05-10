@@ -25,8 +25,12 @@ jobs:
       - run: pnpm exec tsc --noEmit
 
   rust-check:
-    name: Rust cargo check
-    runs-on: macos-latest
+    name: Rust cargo check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -35,5 +39,6 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          key: ${{ matrix.os }}
 
       - run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets
