@@ -287,7 +287,27 @@ fn system_idle_seconds() -> f64 {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+fn system_idle_seconds() -> f64 {
+    use windows_sys::Win32::System::SystemInformation::GetTickCount;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
+
+    let mut lii = LASTINPUTINFO {
+        cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32,
+        dwTime: 0,
+    };
+    let ok = unsafe { GetLastInputInfo(&mut lii) };
+    if ok == 0 {
+        return 0.0;
+    }
+    // GetTickCount wraps every 49.7 days. wrapping_sub keeps idle correct
+    // across that boundary since dwTime and GetTickCount share the same
+    // 32-bit modulus.
+    let idle_ms = unsafe { GetTickCount() }.wrapping_sub(lii.dwTime);
+    (idle_ms as f64) / 1000.0
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn system_idle_seconds() -> f64 {
     0.0
 }
@@ -438,7 +458,53 @@ fn frontmost_bundle_id() -> Option<String> {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+fn frontmost_bundle_id() -> Option<String> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowThreadProcessId,
+    };
+
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_null() {
+            return None;
+        }
+
+        let mut pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        if pid == 0 {
+            return None;
+        }
+
+        let h_proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if h_proc.is_null() {
+            return None;
+        }
+
+        let mut buf: [u16; 260] = [0; 260]; // MAX_PATH
+        let mut size: u32 = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(h_proc, 0, buf.as_mut_ptr(), &mut size);
+        CloseHandle(h_proc);
+
+        if ok == 0 || size == 0 {
+            return None;
+        }
+
+        let path = String::from_utf16_lossy(&buf[..size as usize]);
+        // Return just the executable name (e.g., "firefox.exe") to keep the
+        // identifier short and avoid leaking user-specific install paths.
+        std::path::Path::new(&path)
+            .file_name()
+            .map(|f| f.to_string_lossy().into_owned())
+            .or(Some(path))
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn frontmost_bundle_id() -> Option<String> {
     None
 }

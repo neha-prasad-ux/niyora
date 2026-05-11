@@ -32,6 +32,13 @@ struct TrayRect(Arc<Mutex<Option<(f64, f64, f64, f64)>>>);
 /// 60-second practice. Set from the frontend on Begin / Done.
 struct SessionActive(Arc<Mutex<bool>>);
 
+/// Windows-only: instant of the most recent tray-driven toggle. The
+/// focus-lost handler consults this to avoid a hide+show flash when the
+/// user clicks the tray icon while the window is visible (focus-loss
+/// fires before the tray click, and would otherwise re-show on toggle).
+#[cfg(not(target_os = "macos"))]
+struct LastTrayToggle(Arc<Mutex<Option<Instant>>>);
+
 #[tauri::command]
 fn set_session_active(active: bool, state: tauri::State<'_, SessionActive>) {
     *state.0.lock().unwrap() = active;
@@ -105,6 +112,12 @@ fn hide_panel(app_handle: tauri::AppHandle) {
     {
         let panel = app_handle.get_webview_panel("main").unwrap();
         panel.order_out(None);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        if let Some(window) = app_handle.get_webview_window("main") {
+            let _ = window.hide();
+        }
     }
 }
 
@@ -205,8 +218,10 @@ fn main() {
     let tray_rect: Arc<Mutex<Option<(f64, f64, f64, f64)>>> = Arc::new(Mutex::new(None));
     let session_active: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
     let current_tray_state: Arc<Mutex<TrayState>> = Arc::new(Mutex::new(TrayState::Measuring));
+    #[cfg(not(target_os = "macos"))]
+    let last_tray_toggle: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .manage(LastSessionTime(last_session.clone()))
         .manage(SituationalStateHandle(situational.clone()))
         .manage(SnoozedUntil(snoozed.clone()))
@@ -234,20 +249,47 @@ fn main() {
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_nspanel::init())
+        .plugin(tauri_plugin_notification::init());
+
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_nspanel::init());
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.manage(LastTrayToggle(last_tray_toggle.clone()));
+
+    // Windows: collapse a second launch (re-running the .exe while we're
+    // already running) into a focus of the existing instance. macOS handles
+    // this natively via the Reopen event in the run loop below.
+    #[cfg(target_os = "windows")]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(
+        |app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                if window.is_visible().unwrap_or(false) {
+                    let _ = window.set_focus();
+                } else {
+                    toggle_panel(app);
+                }
+            }
+        },
+    ));
+
+    builder
         .plugin({
-            // Global hotkey: Cmd+Option+Shift+N toggles the panel. The tray
-            // icon can disappear behind notches or get pushed off when the
-            // menu bar is crowded; this gives users a guaranteed way in.
+            // Global hotkey: toggles the panel. The tray icon can disappear
+            // behind notches or get pushed off when the menu bar is crowded;
+            // this gives users a guaranteed way in. macOS uses Cmd+Opt+Shift+N
+            // (SUPER on this OS = Cmd); Windows uses Ctrl+Alt+Shift+N.
             use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
+            #[cfg(target_os = "macos")]
+            let primary_mod = Modifiers::SUPER;
+            #[cfg(not(target_os = "macos"))]
+            let primary_mod = Modifiers::CONTROL;
             let toggle_shortcut = Shortcut::new(
-                Some(Modifiers::SUPER | Modifiers::ALT | Modifiers::SHIFT),
+                Some(primary_mod | Modifiers::ALT | Modifiers::SHIFT),
                 Code::KeyN,
             );
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(move |app, shortcut, event| {
                     if shortcut == &toggle_shortcut && event.state() == ShortcutState::Pressed {
-                        #[cfg(target_os = "macos")]
                         toggle_panel(app);
                     }
                 })
@@ -266,13 +308,25 @@ fn main() {
             // Convert the main window to an NSPanel for proper popover behavior
             #[cfg(target_os = "macos")]
             setup_panel(app.handle());
+            #[cfg(not(target_os = "macos"))]
+            setup_window_focus_dismiss(app.handle());
 
-            // Build the tray icon. The body PNG (ring + nucleus only) is set
-            // as a template so macOS auto-tints it per-pixel against the
-            // local menu-bar background — same path the Wi-Fi, battery, and
-            // clock icons take. The coloured electron is composited on top
-            // by `tray_mac::apply_state` once the tray is up.
+            // Build the tray icon.
+            //
+            // macOS: the body PNG (ring + nucleus only) is set as a template
+            // so macOS auto-tints it per-pixel against the local menu-bar
+            // background, same path the Wi-Fi, battery, and clock icons take.
+            // The coloured electron is composited on top by
+            // `tray_mac::apply_state` once the tray is up.
+            //
+            // Windows: no template-tint pipeline, so we use the solid app
+            // icon directly. State visualization (measuring vs reminder) is
+            // deferred to a future version; v1 uses a single static icon.
+            #[cfg(target_os = "macos")]
             let tray_icon = Image::from_bytes(include_bytes!("../icons/tray-body.png"))
+                .expect("failed to load tray icon");
+            #[cfg(not(target_os = "macos"))]
+            let tray_icon = Image::from_bytes(include_bytes!("../icons/32x32.png"))
                 .expect("failed to load tray icon");
 
             // Tray right-click menu. To add items: extend the MenuBuilder chain below
@@ -280,8 +334,11 @@ fn main() {
             //   "show"      -> Show Niyora (toggles the panel)
             //   "snooze_1h" -> Suppress reminders for the next 1 hour
             //   "quit"      -> Cleanly exit the app
-            let show_item =
-                MenuItemBuilder::with_id("show", "Show Niyora    ⌘⌥⇧N").build(app)?;
+            #[cfg(target_os = "macos")]
+            let show_label = "Show Niyora    ⌘⌥⇧N";
+            #[cfg(not(target_os = "macos"))]
+            let show_label = "Show Niyora    Ctrl+Alt+Shift+N";
+            let show_item = MenuItemBuilder::with_id("show", show_label).build(app)?;
             let snooze_item =
                 MenuItemBuilder::with_id("snooze_1h", "Snooze for 1 hour").build(app)?;
             let check_updates_item =
@@ -317,15 +374,19 @@ fn main() {
                 .item(&quit_item)
                 .build()?;
 
+            #[cfg(target_os = "macos")]
+            let tooltip_text = "Niyora · Breathe (⌘⌥⇧N)";
+            #[cfg(not(target_os = "macos"))]
+            let tooltip_text = "Niyora · Breathe (Ctrl+Alt+Shift+N)";
+
             TrayIconBuilder::with_id("tray")
                 .icon(tray_icon)
                 .icon_as_template(true)
-                .tooltip("Niyora · Breathe (⌘⌥⇧N)")
+                .tooltip(tooltip_text)
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "show" => {
-                        #[cfg(target_os = "macos")]
                         toggle_panel(app);
                     }
                     "snooze_1h" => {
@@ -389,13 +450,16 @@ fn main() {
                 .build(app)?;
 
             // Register the global toggle shortcut. Same key combo as the
-            // plugin handler above (Cmd+Option+Shift+N). Failures are logged
-            // but non-fatal: the tray icon and notifications still work
-            // without a hotkey.
+            // plugin handler above. Failures are logged but non-fatal: the
+            // tray icon and notifications still work without a hotkey.
             {
                 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
+                #[cfg(target_os = "macos")]
+                let primary_mod = Modifiers::SUPER;
+                #[cfg(not(target_os = "macos"))]
+                let primary_mod = Modifiers::CONTROL;
                 let toggle_shortcut = Shortcut::new(
-                    Some(Modifiers::SUPER | Modifiers::ALT | Modifiers::SHIFT),
+                    Some(primary_mod | Modifiers::ALT | Modifiers::SHIFT),
                     Code::KeyN,
                 );
                 if let Err(e) = app.global_shortcut().register(toggle_shortcut) {
@@ -424,7 +488,6 @@ fn main() {
                     std::thread::sleep(Duration::from_millis(900));
                     let h = handle_for_first_launch.clone();
                     let _ = handle_for_first_launch.run_on_main_thread(move || {
-                        #[cfg(target_os = "macos")]
                         toggle_panel(&h);
                     });
                     // Spin the tray electron for a few seconds so a first-time
@@ -452,7 +515,13 @@ fn main() {
                         }
                     }
                     #[cfg(not(target_os = "macos"))]
-                    let _ = h;
+                    {
+                        if let Some(window) = h.get_webview_window("main") {
+                            if !window.is_visible().unwrap_or(false) {
+                                toggle_panel(&h);
+                            }
+                        }
+                    }
                 });
             });
 
@@ -674,5 +743,134 @@ fn toggle_panel(app_handle: &tauri::AppHandle) {
     let _ = app_handle.emit("panel_did_show", ());
 }
 
+/// Windows toggle: show the main window anchored adjacent to the tray icon,
+/// or hide it if visible. Tauri's tray-icon plugin captures the tray rect on
+/// click events via `tauri_plugin_positioner`, so we reuse the same approach
+/// as macOS: anchor in screen coordinates rather than letting the positioner
+/// re-compute after the window has been hidden/moved.
 #[cfg(not(target_os = "macos"))]
-fn toggle_panel(_app_handle: &tauri::AppHandle) {}
+fn toggle_panel(app_handle: &tauri::AppHandle) {
+    let Some(window) = app_handle.get_webview_window("main") else {
+        return;
+    };
+
+    if window.is_visible().unwrap_or(false) {
+        let _ = window.hide();
+        if let Some(state) = app_handle.try_state::<LastTrayToggle>() {
+            *state.0.lock().unwrap() = Some(Instant::now());
+        }
+        return;
+    }
+
+    // Suppress the show if the focus-lost handler just hid the window
+    // within the last 250ms (typical when the user clicks the tray icon
+    // while the window is focused: focus-loss arrives first and hides,
+    // then the tray click would otherwise immediately re-show).
+    if let Some(state) = app_handle.try_state::<LastTrayToggle>() {
+        let mut guard = state.0.lock().unwrap();
+        if let Some(t) = *guard {
+            if t.elapsed() < Duration::from_millis(250) {
+                *guard = None;
+                return;
+            }
+        }
+        *guard = Some(Instant::now());
+    }
+
+    if let Ok(Some(monitor)) = window.current_monitor() {
+        let screen = monitor.size();
+        let scale = monitor.scale_factor();
+        let tray = app_handle
+            .try_state::<TrayRect>()
+            .and_then(|s| *s.0.lock().unwrap());
+
+        let panel_w_logical: f64 = 420.0;
+        let panel_h_logical: f64 = 520.0;
+        let panel_w_phys = panel_w_logical * scale;
+        let panel_h_phys = panel_h_logical * scale;
+        let screen_w = screen.width as f64;
+        let screen_h = screen.height as f64;
+        let edge_margin = 8.0 * scale;
+        let gap_phys = 8.0 * scale;
+
+        // Anchor relative to the tray icon. The Windows taskbar can be on
+        // any edge; we place the panel on the side of the tray icon facing
+        // the screen center so it never gets clipped behind the taskbar.
+        let (mut x_phys, mut y_phys) = if let Some((tx, ty, tw, th)) = tray {
+            let tray_center_x = tx + tw / 2.0;
+            let tray_center_y = ty + th / 2.0;
+            let y = if tray_center_y > screen_h / 2.0 {
+                ty - panel_h_phys - gap_phys
+            } else {
+                ty + th + gap_phys
+            };
+            let x = tray_center_x - panel_w_phys / 2.0;
+            (x, y)
+        } else {
+            // Fallback before the first tray event has captured a rect:
+            // bottom-right with a taskbar-sized margin.
+            let taskbar_phys = 48.0 * scale;
+            let x = screen_w - panel_w_phys - edge_margin;
+            let y = screen_h - panel_h_phys - taskbar_phys - gap_phys;
+            (x, y)
+        };
+
+        if x_phys + panel_w_phys + edge_margin > screen_w {
+            x_phys = screen_w - panel_w_phys - edge_margin;
+        }
+        if x_phys < edge_margin {
+            x_phys = edge_margin;
+        }
+        if y_phys + panel_h_phys + edge_margin > screen_h {
+            y_phys = screen_h - panel_h_phys - edge_margin;
+        }
+        if y_phys < edge_margin {
+            y_phys = edge_margin;
+        }
+
+        let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+            x: x_phys.round() as i32,
+            y: y_phys.round() as i32,
+        }));
+    }
+
+    let _ = window.show();
+    let _ = window.set_focus();
+
+    set_tray_state(app_handle, TrayState::Measuring);
+    let _ = app_handle.emit("panel_did_show", ());
+}
+
+/// Windows click-outside-to-dismiss: hide the window when it loses focus,
+/// matching the menu-bar app pattern. Stays sticky during onboarding and
+/// during an active breathing session so a stray click can't lose state.
+#[cfg(not(target_os = "macos"))]
+fn setup_window_focus_dismiss(app_handle: &tauri::AppHandle) {
+    let Some(window) = app_handle.get_webview_window("main") else {
+        return;
+    };
+    let handle = app_handle.clone();
+    window.on_window_event(move |event| {
+        if let tauri::WindowEvent::Focused(focused) = event {
+            if *focused {
+                return;
+            }
+            if !onboarding::is_onboarded() {
+                return;
+            }
+            let active = handle
+                .try_state::<SessionActive>()
+                .map(|s| *s.0.lock().unwrap())
+                .unwrap_or(false);
+            if active {
+                return;
+            }
+            if let Some(window) = handle.get_webview_window("main") {
+                let _ = window.hide();
+            }
+            if let Some(state) = handle.try_state::<LastTrayToggle>() {
+                *state.0.lock().unwrap() = Some(Instant::now());
+            }
+        }
+    });
+}
