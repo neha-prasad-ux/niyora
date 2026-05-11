@@ -265,22 +265,27 @@ jobs:
           STAGED="release-files"
           mkdir -p "$STAGED"
 
+          # Tauri 2 NSIS bundler emits the installer and a detached signature
+          # directly on the .exe (no .nsis.zip wrapper). The updater plugin
+          # downloads and runs the .exe directly.
           EXE_SRC=$(find "$NSIS_DIR" -maxdepth 1 -name '*-setup.exe' | head -1)
-          ZIP_SRC=$(find "$NSIS_DIR" -maxdepth 1 -name '*-setup.nsis.zip' | head -1)
-          SIG_SRC=$(find "$NSIS_DIR" -maxdepth 1 -name '*-setup.nsis.zip.sig' | head -1)
+          SIG_SRC=$(find "$NSIS_DIR" -maxdepth 1 -name '*-setup.exe.sig' | head -1)
+
+          if [ -z "$EXE_SRC" ] || [ -z "$SIG_SRC" ]; then
+            echo "Missing bundle outputs. EXE=$EXE_SRC SIG=$SIG_SRC"
+            ls -la "$NSIS_DIR"
+            exit 1
+          fi
 
           EXE_DEST="$STAGED/Niyora-${REF}-Windows-x64.exe"
-          ZIP_DEST="$STAGED/Niyora-${REF}-Windows-x64.nsis.zip"
-          SIG_DEST="$STAGED/Niyora-${REF}-Windows-x64.nsis.zip.sig"
+          SIG_DEST="$STAGED/Niyora-${REF}-Windows-x64.exe.sig"
 
           cp "$EXE_SRC" "$EXE_DEST"
-          cp "$ZIP_SRC" "$ZIP_DEST"
           cp "$SIG_SRC" "$SIG_DEST"
 
           {
             echo "version=$REF"
             echo "exe=$(basename "$EXE_DEST")"
-            echo "zip=$(basename "$ZIP_DEST")"
             echo "sig=$(basename "$SIG_DEST")"
             echo "sig_path=$SIG_DEST"
             echo "platform=windows-x86_64"
@@ -291,7 +296,7 @@ jobs:
       - name: Install wrangler
         run: npm install -g wrangler
 
-      - name: Upload installer and updater bundle to Cloudflare R2
+      - name: Upload installer and signature to Cloudflare R2
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -300,17 +305,11 @@ jobs:
           set -eo pipefail
           BUCKET="niyora-downloads"
           EXE="release-files/${{ steps.stage.outputs.exe }}"
-          ZIP="release-files/${{ steps.stage.outputs.zip }}"
           SIG="release-files/${{ steps.stage.outputs.sig }}"
 
           wrangler r2 object put "$BUCKET/${{ steps.stage.outputs.exe }}" \
             --file "$EXE" \
             --content-type "application/vnd.microsoft.portable-executable" \
-            --remote
-
-          wrangler r2 object put "$BUCKET/${{ steps.stage.outputs.zip }}" \
-            --file "$ZIP" \
-            --content-type "application/zip" \
             --remote
 
           wrangler r2 object put "$BUCKET/${{ steps.stage.outputs.sig }}" \
@@ -327,7 +326,7 @@ jobs:
           {
             "platform": "${{ steps.stage.outputs.platform }}",
             "version": "${{ steps.stage.outputs.version }}",
-            "zip": "${{ steps.stage.outputs.zip }}",
+            "exe": "${{ steps.stage.outputs.exe }}",
             "sig_file": "${{ steps.stage.outputs.sig }}",
             "signature_inline": "$(cat "${{ steps.stage.outputs.sig_path }}" | tr -d '\n' | sed 's/"/\\"/g')"
           }
@@ -340,8 +339,7 @@ jobs:
           name: niyora-windows-x86_64
           path: |
             release-files/*.exe
-            release-files/*.nsis.zip
-            release-files/*.nsis.zip.sig
+            release-files/*.exe.sig
             updater-meta/*.json
           if-no-files-found: error
 
@@ -368,8 +366,7 @@ jobs:
           find artifacts -name 'Niyora-*-*.app.tar.gz' -exec cp {} release-files/ \;
           find artifacts -name 'Niyora-*-*.app.tar.gz.sig' -exec cp {} release-files/ \;
           find artifacts -name 'Niyora-*-*.exe' -exec cp {} release-files/ \;
-          find artifacts -name 'Niyora-*-*.nsis.zip' -exec cp {} release-files/ \;
-          find artifacts -name 'Niyora-*-*.nsis.zip.sig' -exec cp {} release-files/ \;
+          find artifacts -name 'Niyora-*-*.exe.sig' -exec cp {} release-files/ \;
           ls -la release-files
 
       - name: Build latest.json (Tauri updater manifest)
@@ -380,7 +377,7 @@ jobs:
 
           ARM_SIG_FILE=$(find release-files -name "Niyora-${REF}-AppleSilicon.app.tar.gz.sig" | head -1)
           INTEL_SIG_FILE=$(find release-files -name "Niyora-${REF}-Intel.app.tar.gz.sig" | head -1)
-          WIN_SIG_FILE=$(find release-files -name "Niyora-${REF}-Windows-x64.nsis.zip.sig" | head -1)
+          WIN_SIG_FILE=$(find release-files -name "Niyora-${REF}-Windows-x64.exe.sig" | head -1)
 
           if [ -z "$ARM_SIG_FILE" ] || [ -z "$INTEL_SIG_FILE" ] || [ -z "$WIN_SIG_FILE" ]; then
             echo "Missing signature files. ARM=$ARM_SIG_FILE INTEL=$INTEL_SIG_FILE WIN=$WIN_SIG_FILE"
@@ -404,7 +401,7 @@ jobs:
             --arg arm_sig "$ARM_SIG" \
             --arg intel_url "https://downloads.niyora.com/Niyora-${REF}-Intel.app.tar.gz" \
             --arg intel_sig "$INTEL_SIG" \
-            --arg win_url "https://downloads.niyora.com/Niyora-${REF}-Windows-x64.nsis.zip" \
+            --arg win_url "https://downloads.niyora.com/Niyora-${REF}-Windows-x64.exe" \
             --arg win_sig "$WIN_SIG" \
             '{
               version: $version,
