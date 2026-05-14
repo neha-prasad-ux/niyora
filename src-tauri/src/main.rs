@@ -44,6 +44,21 @@ fn set_session_active(active: bool, state: tauri::State<'_, SessionActive>) {
     *state.0.lock().unwrap() = active;
 }
 
+/// Returns true the first time the panel opens on a given local day, and
+/// stamps today's date so later calls in the same day return false. The
+/// frontend uses this to swap the intro copy on the day's first open.
+#[tauri::command]
+fn claim_first_open_today() -> bool {
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let mut cfg = config::load();
+    let was_first = cfg.last_opened_date.as_deref() != Some(today.as_str());
+    if was_first {
+        cfg.last_opened_date = Some(today);
+        let _ = config::save(&cfg);
+    }
+    was_first
+}
+
 /// Visual state of the menu-bar icon.
 ///
 /// `Measuring` is the default while the app is running: a green electron on
@@ -232,6 +247,7 @@ fn main() {
             hide_panel,
             resize_panel,
             set_session_active,
+            claim_first_open_today,
             situational::get_situational_snapshot,
             analytics::log_event,
             analytics::should_show_pss4,

@@ -32,16 +32,22 @@ function App() {
   // the state so the next panel open shows the onboarding flow again.
   useEffect(() => {
     let unlisten: (() => void) | null = null;
+    let cancelled = false;
     listen("onboarding_reset", () => {
       setNeedsOnboarding(true);
     })
       .then((u) => {
-        unlisten = u;
+        // StrictMode double-invokes effects in dev. If cleanup already ran
+        // before listen() resolved, unlisten immediately so we don't leave
+        // a duplicate listener registered.
+        if (cancelled) u();
+        else unlisten = u;
       })
       .catch(() => {
         /* event plugin unavailable in dev preview */
       });
     return () => {
+      cancelled = true;
       if (unlisten) unlisten();
     };
   }, []);
@@ -51,17 +57,20 @@ function App() {
   // first (Box Breath default + AHA screen).
   useEffect(() => {
     let unlisten: (() => void) | null = null;
+    let cancelled = false;
     listen("sessions_reset", () => {
       setView("main");
       setOpenKey((k) => k + 1);
     })
       .then((u) => {
-        unlisten = u;
+        if (cancelled) u();
+        else unlisten = u;
       })
       .catch(() => {
         /* event plugin unavailable in dev preview */
       });
     return () => {
+      cancelled = true;
       if (unlisten) unlisten();
     };
   }, []);
@@ -70,6 +79,10 @@ function App() {
   // (new random technique, intro reset, etc.) on every tray click — without
   // reloading the whole page.
   const [openKey, setOpenKey] = useState(0);
+  // True for the very first panel open of each local day. Drives the
+  // "Start your day with a breath." intro copy and forces Box Breath so the
+  // promise of ~60s holds.
+  const [isFirstOpenToday, setIsFirstOpenToday] = useState(false);
   // Dev-only stress override. When non-null, replaces the real snapshot
   // so we can preview every tier without waiting for real signals.
   const [devStress, setDevStress] = useState<number | null>(null);
@@ -79,17 +92,34 @@ function App() {
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
-    listen("panel_did_show", () => {
+    let cancelled = false;
+    listen("panel_did_show", async () => {
+      // Resolve day-start BEFORE bumping openKey so BreathingSession sees
+      // the correct prop on first mount (createState runs once). The
+      // backend call is a local file read — fast enough that the panel
+      // doesn't feel laggy.
+      let firstToday = false;
+      try {
+        firstToday = await invoke<boolean>("claim_first_open_today");
+      } catch {
+        firstToday = false;
+      }
+      setIsFirstOpenToday(firstToday);
       setView("main");
       setOpenKey((k) => k + 1);
     })
       .then((u) => {
-        unlisten = u;
+        // Critical: without this, StrictMode's double-invoke leaves two
+        // live listeners. claim_first_open_today would then run twice per
+        // open — the second call returns false and clobbers isFirstOpenToday.
+        if (cancelled) u();
+        else unlisten = u;
       })
       .catch(() => {
         /* event plugin unavailable in dev preview — no-op */
       });
     return () => {
+      cancelled = true;
       if (unlisten) unlisten();
     };
   }, []);
@@ -138,6 +168,7 @@ function App() {
         onComplete={handleSessionComplete}
         snapshot={snapshot}
         completedSessions={stats.completed}
+        isFirstOpenToday={isFirstOpenToday}
       />
       <button
         className="niyora-gear-btn niyora-tip"
