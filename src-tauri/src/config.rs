@@ -21,6 +21,11 @@ pub struct NiyoraConfig {
     /// Determines whether App.tsx shows the onboarding view or the main panel.
     #[serde(default)]
     pub onboarded: bool,
+    /// Local YYYY-MM-DD of the most recent panel open. Stamped by
+    /// `claim_first_open_today`; used to swap the intro copy on the first
+    /// open of each day ("Start your day with a breath.").
+    #[serde(default)]
+    pub last_opened_date: Option<String>,
 }
 
 pub fn config_path() -> Option<PathBuf> {

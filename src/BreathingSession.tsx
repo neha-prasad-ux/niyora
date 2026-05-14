@@ -356,11 +356,14 @@ interface AnimState {
   shownLabel: string; prevLabel: string; labelT: number;
 }
 
-function createState(w: number, h: number, completedSessions?: number): AnimState {
+function createState(w: number, h: number, completedSessions?: number, forceBoxBreath?: boolean): AnimState {
+  const technique = forceBoxBreath
+    ? (breathingList.find((t) => t.name === "Box Breath") ?? randomTechnique(completedSessions))
+    : randomTechnique(completedSessions);
   return {
     particles: Array.from({ length: PARTICLE_COUNT }, () => createParticle(w, h)),
     noise: createNoise(),
-    technique: randomTechnique(completedSessions),
+    technique,
     time: 0, waiting: true, paused: false, introTime: 0, introDone: false,
     phaseIndex: 0, phaseTime: 0, round: 0,
     promptIndex: 0, promptTime: 0, promptOpacity: 0,
@@ -445,13 +448,16 @@ interface Props {
   onComplete: () => void;
   snapshot?: SituationalSnapshot | null;
   completedSessions?: number;
+  /** True on the day's first panel open. Forces Box Breath and swaps the
+   *  intro copy for the "start your day" framing. */
+  isFirstOpenToday?: boolean;
 }
 
-export default function BreathingSession({ onComplete, snapshot, completedSessions }: Props) {
+export default function BreathingSession({ onComplete, snapshot, completedSessions, isFirstOpenToday }: Props) {
   WIDTH = LG_WIDTH;
   HEIGHT = LG_HEIGHT;
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const stateRef = useRef<AnimState>(createState(LG_WIDTH, LG_HEIGHT, completedSessions));
+  const stateRef = useRef<AnimState>(createState(LG_WIDTH, LG_HEIGHT, completedSessions, isFirstOpenToday));
   const rafRef = useRef<number>(0);
   const sizeRef = useRef({ w: LG_WIDTH, h: LG_HEIGHT });
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -464,6 +470,9 @@ export default function BreathingSession({ onComplete, snapshot, completedSessio
   // info screen is showing — stateRef.current.technique mutates, but React
   // needs a nudge to redraw the technique benefits / name.
   const [, setPickNonce] = useState(0);
+  // Once the user picks a technique from "Try a different one", drop the
+  // day-start framing and show the real technique name/subtitle.
+  const [showDayStart, setShowDayStart] = useState(!!isFirstOpenToday);
 
   // Compute which techniques are locked at the user's current tier.
   const userTier = currentTier(completedSessions ?? 0);
@@ -492,6 +501,7 @@ export default function BreathingSession({ onComplete, snapshot, completedSessio
     stateRef.current.promptIndex = 0;
     stateRef.current.promptTime = 0;
     setShowPicker(false);
+    setShowDayStart(false);
     setPickNonce((n) => n + 1);
   }, []);
   const btnParticles = useButtonParticles();
@@ -1276,7 +1286,9 @@ export default function BreathingSession({ onComplete, snapshot, completedSessio
               );
             })()}
             {/* Technique name + subtitle — so users see what they're about
-                to do (and decide whether to "Try a different one"). */}
+                to do (and decide whether to "Try a different one"). On the
+                day's first panel open we swap to a "start your day" framing
+                instead, since the technique is forced to Box Breath. */}
             <div className="info-fade-3" style={{ marginTop: 16, textAlign: "center" }}>
               <div style={{
                 fontSize: 18,
@@ -1285,7 +1297,7 @@ export default function BreathingSession({ onComplete, snapshot, completedSessio
                 color: "rgba(255, 255, 255, 0.95)",
                 marginBottom: 2,
               }}>
-                {stateRef.current.technique.name}
+                {showDayStart ? "Start your day with a breath." : stateRef.current.technique.name}
               </div>
               <div style={{
                 fontSize: 12,
@@ -1293,7 +1305,7 @@ export default function BreathingSession({ onComplete, snapshot, completedSessio
                 letterSpacing: "0.3px",
                 color: "rgba(255, 255, 255, 0.55)",
               }}>
-                {stateRef.current.technique.subtitle}
+                {showDayStart ? "60s goes a long way." : stateRef.current.technique.subtitle}
               </div>
             </div>
             <div style={{ height: 18 }} />
