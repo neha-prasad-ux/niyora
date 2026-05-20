@@ -6,7 +6,6 @@ Living doc. User feedback queued for triage. Score impact (1 low, 5 high) and ef
 
 | # | Item | Source | Impact | Effort | Notes |
 |---|---|---|---|---|---|
-| 1 | Windows / PC build | Multiple users | 5 | 5 | Big TAM unlock. Needs Windows cert, signing pipeline, test machine. Weeks of work. |
 | 2 | Smoother install flow (`.dmg` with Applications drop target, or `.pkg`) | Onboarding observation | 4 | 2 | `create-dmg` with styled background. Half a day. |
 | 3 | Blur / dull background during session | User request | 3 | 2 | Full-screen NSPanel dimmer behind the orb. Privacy check first. |
 | 4 | Visual hierarchy in session text | Onboarding observation | 4 | 1 | Heading = current action (e.g. "Inhale"), smaller text below = what's next ("then hold"). Add "breathe through your nose" cue. Copy + layout in `BreathingSession.tsx`. |
@@ -27,14 +26,18 @@ Living doc. User feedback queued for triage. Score impact (1 low, 5 high) and ef
 | 15 | Opt-in telemetry | 4 | 3 | Local-first; user explicitly enables. Anonymous, aggregate only. Must pass the "does this leak anything?" sniff test. |
 | 16 | HRV integration to measure impact | 4 | 5 | HealthKit is iOS-only, so this needs a companion iPhone app syncing to the Mac over local network. Parallel track, doesn't block macOS polish. Spec: `docs/hrv-companion-spec.md`. |
 | 17 | Marketing roadmap | 5 | 3 | Separate doc: positioning, channels, launch beats. Tie to research credibility (#11, #12) and measurable impact (#16). |
+| 18 | App disappears from tray after Mac restart | User report | 5 | 1 | App doesn't relaunch at login, so the tray icon is gone until the user opens Niyora manually. Register as a macOS Login Item (Tauri autostart plugin or `SMAppService`). Default on; expose toggle in onboarding/Settings. Critical for retention. A reminder app that doesn't survive a reboot is invisible. |
 
 ## Triage notes
 
-- Items 5, 6, 7 are the same root cause: **the app is invisible**. Fix together.
+- Items 5, 6 are the same root cause: **the app is invisible**. Fix together.
 - Items 2, 4 are both onboarding polish; bundle into a "first-run experience" pass.
-- Item 1 (Windows) is a separate track. Don't let it block macOS polish.
 - Item 16 (HRV) is also a separate track. Spec written; needs an iOS dev, Xcode, and a physical iPhone + Watch to build.
 - Item 3 (background blur) needs a privacy review. A full-screen dimmer changes what other apps can see; confirm it doesn't capture or leak anything.
+
+## Shipped
+
+- **Windows / PC build** (was #1). Shipped with Windows cert, signing pipeline, and CI.
 
 ## Later / parked
 
