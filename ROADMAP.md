@@ -27,6 +27,7 @@ Living doc. User feedback queued for triage. Score impact (1 low, 5 high) and ef
 | 16 | HRV integration to measure impact | 4 | 5 | HealthKit is iOS-only, so this needs a companion iPhone app syncing to the Mac over local network. Parallel track, doesn't block macOS polish. Spec: `docs/hrv-companion-spec.md`. |
 | 17 | Marketing roadmap | 5 | 3 | Separate doc: positioning, channels, launch beats. Tie to research credibility (#11, #12) and measurable impact (#16). |
 | 18 | App disappears from tray after Mac restart | User report | 5 | 1 | App doesn't relaunch at login, so the tray icon is gone until the user opens Niyora manually. Register as a macOS Login Item (Tauri autostart plugin or `SMAppService`). Default on; expose toggle in onboarding/Settings. Critical for retention. A reminder app that doesn't survive a reboot is invisible. |
+| 19 | On-demand HRV before and after via watchOS app | 4 | 4 | Builds on #16. Adds a watchOS target to the `ios/` companion so the Watch takes HRV readings exactly around session start and end (via `HKWorkoutSession`), instead of relying on its passive sparse sampling (which can leave the 5-minute pre/post windows empty). Accuracy upgrade, not a new feature. `docs/hrv-companion-spec.md` parks this because it doubles the surface area; revisit once the basic iOS loop is shipping and we see how often real windows come back empty. |
 
 ## Triage notes
 
