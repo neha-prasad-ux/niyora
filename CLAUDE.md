@@ -10,16 +10,41 @@ Notes for Claude Code working on this repo.
 - **What this is not**: the marketing site. That's [neha-prasad-ux/niyora-web](https://github.com/neha-prasad-ux/niyora-web). If a request is about copy, the orb visual, or DNS, you're in the wrong repo.
 - **Why it matters**: this is a privacy product. Every change has to pass the "does this leak anything?" sniff test before it ships.
 
+## Branching and PR discipline (hard rule)
+
+**Never commit to `main`. Never push to `main`. No exceptions.** Not for typo fixes. Not for one-line doc edits. Not for version bumps. Not for "trivial" hotfixes. Not when production is on fire. Not when the change is "obviously safe." Not when the user says "just push it" in passing. If you find yourself about to commit on `main`, stop and branch first.
+
+The workflow is always:
+
+1. `git symbolic-ref --short HEAD` to confirm you are NOT on `main`. If you are, create a branch first.
+2. `git checkout -b <prefix>/<slug>` using prefixes `feat/`, `fix/`, `hotfix/`, `chore/`, or `docs/`.
+3. Commit on the branch.
+4. `git push -u origin <branch>`.
+5. Open a PR with `gh pr create`. Description: what changed, why, how to test.
+6. The maintainer reviews and merges. You do not merge your own PRs.
+
+**Hotfixes follow the same flow.** A `hotfix/` branch + a PR that the maintainer merges in under a minute is still strictly better than a direct push. The review step is the whole point. Skipping it for "speed" is what causes silent divergence.
+
+**Why this rule exists.** A direct commit to local `main` (`7781b86`, "state-aware tray icon") was forgotten, never opened as a PR, and silently diverged from `origin/main` for over a month while seven other PRs landed. The work was eventually superseded by PR #14 and discarded as wasted effort. Branch protection on GitHub would catch this server-side, but is not available on the free plan for private repos, so this rule is the substitute. Treat it like a server-side check that lives in your head.
+
+**Recovering from a wrong-place commit.** If you have already committed on `main` by mistake: do NOT lose work with a bare reset.
+
+```bash
+git branch <prefix>/<slug>        # save the commit on a new branch
+git reset --hard origin/main      # clean up main
+git checkout <prefix>/<slug>      # continue work on the branch
+```
+
 ## Default workflow
 
 1. **Read** [README.md](./README.md), [AGENTS.md](./AGENTS.md), [DESIGN.md](./DESIGN.md), [CONTRIBUTING.md](./CONTRIBUTING.md) before nontrivial changes.
-2. **Branch** off the active dev branch (`feat/v1-scaffold` until v1 ships, then `main`).
+2. **Branch** per the hard rule above. Off `main` (or `feat/v1-scaffold` if that branch is still active).
 3. **Verify locally**:
    - `pnpm exec tsc --noEmit`
    - `cargo check --manifest-path src-tauri/Cargo.toml`
-   - `pnpm tauri dev` for any UI change — actually click around, don't just rely on type checks
+   - `pnpm tauri dev` for any UI change. Actually click around, don't just rely on type checks.
 4. **PR** with a tight description (what + why + how to test).
-5. **Merge** after review.
+5. **Merge** after review. The maintainer merges; you do not.
 
 ## House rules (Claude-specific)
 
