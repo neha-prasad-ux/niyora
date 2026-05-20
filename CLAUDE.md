@@ -35,6 +35,26 @@ git reset --hard origin/main      # clean up main
 git checkout <prefix>/<slug>      # continue work on the branch
 ```
 
+## Release discipline (hard rule)
+
+**Every release ships to staging first. Never push a clean semver tag without a `-beta` tag on the same commit first. No exceptions.** Not for "obviously safe" UI tweaks. Not for one-line copy changes. Not for urgent prod hotfixes. The two-tag flow is the whole release contract.
+
+The release channel is decided by the tag shape (see [.github/workflows/release.yml](./.github/workflows/release.yml)):
+
+- **Hyphenated tag** (`v0.4.0-beta.1`, `v0.4.0-rc.1`) → STAGING. Builds with `src-tauri/tauri.staging.conf.json`: bundle ID `com.niyora.breathing.staging`, product name "Niyora Staging", updater feed at `staging.json`. Installs alongside production. Real users never see it.
+- **Clean semver tag** (`v0.4.0`) → PRODUCTION. Builds with the production identifier; updater feed at `latest.json`. Existing users auto-update.
+
+The workflow is always:
+
+1. After PRs merge to `main`, on `main`, bump `package.json` and `src-tauri/tauri.conf.json` versions, commit, push.
+2. `git tag vX.Y.Z-beta.1 && git push origin vX.Y.Z-beta.1`. Wait for CI (~20 min). Install from `https://downloads.niyora.com/Niyora-Staging-X.Y.Z-beta.1-AppleSilicon.dmg` (or `Windows-x64.exe`).
+3. Smoke-test the change end-to-end on staging. Watch for ~24 to 48h.
+4. Promote by tagging the SAME commit with the clean version: `git tag vX.Y.Z <staging-commit> && git push origin vX.Y.Z`. CI rebuilds with the production identity and updates `latest.json`.
+
+If staging breaks, bump to `-beta.2` on a fix commit and restart the clock. No clean version goes out until staging is healthy. If a beta sits un-promoted for more than ~2 days, either promote it or write down why it stalled. Staging is not a graveyard.
+
+**Why this rule exists.** The bundle ID, signing identity, and data dir for the production app belong to real users' sessions. The staging build is structurally identical code with a different identity, so a green staging build is a green production build minus the audience. Skipping staging skips the only checkpoint that catches "ships but immediately breaks for everyone" before it does.
+
 ## Default workflow
 
 1. **Read** [README.md](./README.md), [AGENTS.md](./AGENTS.md), [DESIGN.md](./DESIGN.md), [CONTRIBUTING.md](./CONTRIBUTING.md) before nontrivial changes.
@@ -88,6 +108,8 @@ These are on top of [AGENTS.md](./AGENTS.md), not instead of it.
 | Local data dir / config | `src-tauri/src/config.rs` |
 | App icons / audio | `public/icons/`, `public/audio/` |
 | Bundle ID / signing / entitlements | `src-tauri/tauri.conf.json` |
+| Staging build identity (separate bundle ID) | `src-tauri/tauri.staging.conf.json` |
+| Release pipeline (staging vs prod tagging) | `.github/workflows/release.yml` |
 | Conventions for agents | this file or `AGENTS.md` |
 
 ## When you're unsure
