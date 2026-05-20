@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useSnapshot, scoreToBallGradient } from "./useSnapshot";
 import { useSessionStats } from "./useSessionStats";
@@ -103,6 +104,13 @@ export default function Settings({ onBack, onOpenPss4 }: Props) {
     import.meta.env.DEV ? readForcedSessions() : null
   );
   const completed = forcedSessions ?? liveStats.completed;
+
+  const [version, setVersion] = useState("");
+  useEffect(() => {
+    getVersion().then(setVersion).catch(() => {
+      /* leave empty if the API is unavailable in dev preview */
+    });
+  }, []);
 
   const [pss4History, setPss4History] = useState<Pss4Entry[]>([]);
   useEffect(() => {
@@ -263,7 +271,8 @@ export default function Settings({ onBack, onOpenPss4 }: Props) {
         </div>
 
         <div className="soul-footer">
-          Niyora runs entirely on your Mac. No accounts, no tracking, no data sent anywhere. Breathe easy.
+          Niyora runs entirely on your Mac. No accounts, no profiles. Analytics are anonymous, optional, and only sent if you choose. Breathe easy.
+          {version && <span className="soul-version">Version {version}</span>}
         </div>
 
         {import.meta.env.DEV && (

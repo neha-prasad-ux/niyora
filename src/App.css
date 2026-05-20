@@ -1133,6 +1133,13 @@ html, body, #root {
   margin: 0 auto;
 }
 
+.soul-version {
+  display: block;
+  margin-top: 6px;
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
 /* ============================================================ */
 /* Pre-session secondary action + technique picker overlay */
 /* ============================================================ */
@@ -1454,6 +1461,46 @@ html, body, #root {
   opacity: 0.4;
   cursor: default;
   box-shadow: 0 4px 14px hsla(270, 50%, 40%, 0.2);
+}
+
+/* Analytics consent detail panel. the "what we don't collect" reassurance. */
+.onboarding-note {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 11.5px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.62);
+  text-align: left;
+}
+
+/* Consent slide: stacked primary + secondary buttons. */
+.onboarding-consent-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.onboarding-consent-actions .onboarding-btn {
+  width: 100%;
+  padding-left: 0;
+  padding-right: 0;
+}
+.onboarding-consent-actions .onboarding-btn:first-child {
+  margin-top: 20px;
+}
+.onboarding-btn-secondary {
+  margin-top: 0;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: none;
+}
+.onboarding-btn-secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: none;
 }
 
 /* "I live up here" pointer on the first onboarding slide.
