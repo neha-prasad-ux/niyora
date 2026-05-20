@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Niyora discovers the iPhone HRV companion on your local wifi to show how your breathing sessions affect your heart rate variability. No data leaves your local network.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_niyora._tcp</string>
+    </array>
+</dict>
+</plist>

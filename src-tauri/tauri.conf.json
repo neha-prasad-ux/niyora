@@ -48,7 +48,8 @@
         "windowSize": { "width": 660, "height": 400 },
         "appPosition": { "x": 330, "y": 200 },
         "applicationFolderPosition": { "x": 1200, "y": 200 }
-      }
+      },
+      "infoPlist": "Info.plist"
     },
     "windows": {
       "nsis": {
