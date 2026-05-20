@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod analytics;
+mod companion_sync;
 mod config;
 mod onboarding;
 mod reminder;
@@ -236,6 +237,11 @@ fn main() {
     #[cfg(not(target_os = "macos"))]
     let last_tray_toggle: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
 
+    // HRV companion sync (milestone 3). `start` returns a disabled handle
+    // unless `NIYORA_COMPANION_SYNC=1` is set, so existing users see no
+    // change in behaviour. See `companion_sync::mod` for the protocol.
+    let companion = companion_sync::start();
+
     let builder = tauri::Builder::default()
         .manage(LastSessionTime(last_session.clone()))
         .manage(SituationalStateHandle(situational.clone()))
@@ -243,6 +249,7 @@ fn main() {
         .manage(TrayRect(tray_rect.clone()))
         .manage(SessionActive(session_active.clone()))
         .manage(CurrentTrayState(current_tray_state.clone()))
+        .manage(companion)
         .invoke_handler(tauri::generate_handler![
             hide_panel,
             resize_panel,
