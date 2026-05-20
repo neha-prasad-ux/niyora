@@ -101,7 +101,7 @@ pub fn record_session(
     // skip the emit silently rather than send a window with no `end`.
     if completed {
         if let Some(end) = compute_end(&started_at, actual_duration_sec) {
-            companion.send_window(SessionWindow {
+            companion.enqueue_window(SessionWindow {
                 session_id,
                 start: started_at,
                 end,

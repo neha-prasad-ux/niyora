@@ -4,6 +4,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { useSnapshot, scoreToBallGradient } from "./useSnapshot";
 import { useSessionStats } from "./useSessionStats";
 import { TIERS, currentTier, nextTier, sessionsToNext, type Tier } from "./tiers";
+import { CompanionCard } from "./CompanionCard";
 
 interface Props {
   onBack: () => void;
@@ -241,6 +242,8 @@ export default function Settings({ onBack, onOpenPss4 }: Props) {
             {pss4History.length === 0 ? "Begin" : "Take again"}
           </button>
         </div>
+
+        <CompanionCard />
 
         <div className="soul-card soul-card-cta">
           <div className="soul-cta-title">Message the founder</div>

@@ -26,6 +26,11 @@ pub struct NiyoraConfig {
     /// open of each day ("Start your day with a breath.").
     #[serde(default)]
     pub last_opened_date: Option<String>,
+    /// Stable identity of this Mac as seen by paired iPhones. Minted on
+    /// first launch of the companion service; persisted so a phone's
+    /// stored secret keeps mapping to the same server across reboots.
+    #[serde(default)]
+    pub companion_server_id: Option<String>,
 }
 
 pub fn config_path() -> Option<PathBuf> {
