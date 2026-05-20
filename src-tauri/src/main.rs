@@ -237,11 +237,6 @@ fn main() {
     #[cfg(not(target_os = "macos"))]
     let last_tray_toggle: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
 
-    // HRV companion sync (milestone 3). `start` returns a disabled handle
-    // unless `NIYORA_COMPANION_SYNC=1` is set, so existing users see no
-    // change in behaviour. See `companion_sync::mod` for the protocol.
-    let companion = companion_sync::start();
-
     let builder = tauri::Builder::default()
         .manage(LastSessionTime(last_session.clone()))
         .manage(SituationalStateHandle(situational.clone()))
@@ -249,7 +244,6 @@ fn main() {
         .manage(TrayRect(tray_rect.clone()))
         .manage(SessionActive(session_active.clone()))
         .manage(CurrentTrayState(current_tray_state.clone()))
-        .manage(companion)
         .invoke_handler(tauri::generate_handler![
             hide_panel,
             resize_panel,
@@ -268,6 +262,14 @@ fn main() {
             onboarding::is_onboarded,
             onboarding::mark_onboarded,
             onboarding::request_notification_permission,
+            #[cfg(target_os = "macos")]
+            companion_sync::commands::companion_status,
+            #[cfg(target_os = "macos")]
+            companion_sync::commands::companion_start_pairing,
+            #[cfg(target_os = "macos")]
+            companion_sync::commands::companion_cancel_pairing,
+            #[cfg(target_os = "macos")]
+            companion_sync::commands::companion_unpair,
         ])
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_opener::init())
@@ -319,6 +321,14 @@ fn main() {
                 .build()
         })
         .setup(move |app| {
+            // HRV companion sync (milestones 3-4). macOS does the real
+            // work · binds a port and advertises only when a phone is
+            // already paired or the user starts pairing from Settings.
+            // Windows gets a no-op stub so cross-platform call sites
+            // (sessions.rs) stay clean.
+            let companion = companion_sync::start(app.handle().clone());
+            app.manage(companion);
+
             // Hide from dock — menu bar only
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);

@@ -995,6 +995,132 @@ html, body, #root {
 }
 .soul-card-cta.is-placeholder { opacity: 0.65; }
 
+/* Companion · "Connect your iPhone" card and pairing modal */
+.companion-devices {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 10px;
+}
+.companion-device {
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.companion-device-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.companion-device-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: hsla(140, 70%, 55%, 0.95);
+  box-shadow: 0 0 6px hsla(140, 70%, 55%, 0.6);
+  flex: 0 0 auto;
+}
+.companion-device-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.92);
+  flex: 1 1 auto;
+}
+.companion-unpair {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.7);
+  font-family: 'Poppins', sans-serif;
+  font-size: 10px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.companion-unpair:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.companion-device-meta {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.45);
+  padding-left: 16px;
+  margin-top: 2px;
+}
+.companion-error {
+  font-size: 11px;
+  color: hsla(0, 70%, 70%, 0.95);
+  margin-top: 8px;
+}
+
+.companion-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+.companion-modal {
+  background: rgba(20, 18, 30, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  padding: 22px 22px 18px;
+  width: min(320px, 88vw);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+.companion-modal-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.95);
+}
+.companion-modal-steps {
+  font-size: 11px;
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.65);
+  line-height: 1.5;
+  margin: 0;
+  padding-left: 18px;
+  align-self: stretch;
+}
+.companion-qr {
+  background: #fff;
+  padding: 10px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.companion-qr svg {
+  display: block;
+  width: 220px;
+  height: 220px;
+}
+.companion-modal-timer {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+  font-variant-numeric: tabular-nums;
+}
+.companion-modal-cancel {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.8);
+  font-family: 'Poppins', sans-serif;
+  font-size: 12px;
+  padding: 6px 18px;
+  border-radius: 14px;
+  cursor: pointer;
+}
+.companion-modal-cancel:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
 .soul-footer {
   text-align: center;
   font-size: 11.5px;
