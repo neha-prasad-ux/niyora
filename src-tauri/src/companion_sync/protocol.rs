@@ -27,7 +27,10 @@ use serde::{Deserialize, Serialize};
 pub const PROTOCOL_VERSION: u32 = 1;
 
 /// A message from the phone to the Mac.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// `Eq` is not derived because `HrvResult` carries `f64` fields, which do
+/// not implement `Eq` (NaN != NaN). All call sites use `assert_eq!` /
+/// `PartialEq`, which is enough.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMessage {
     /// First frame on every connection. `pairing_id` is present only when
@@ -44,6 +47,34 @@ pub enum ClientMessage {
     /// case hex of `HMAC-SHA256(secret_bytes, nonce_bytes)` where the nonce
     /// is decoded from the hex string the server sent.
     Auth { hmac_hex: String },
+    /// HRV computed by the phone for a session window the Mac previously
+    /// sent. One per session_id. Fields are optional so the phone can
+    /// honestly report "no data this time" without inventing numbers,
+    /// matching the spec's "honest gaps" principle.
+    HrvResult {
+        session_id: String,
+        /// Mean SDNN over the pre-session window, in milliseconds.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pre_ms: Option<f64>,
+        /// Mean SDNN over the post-session window, in milliseconds.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        post_ms: Option<f64>,
+        /// post_ms - pre_ms. Convenience for the Mac so My Soul does not
+        /// have to compute the same arithmetic.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        delta_ms: Option<f64>,
+        sample_counts: HrvSampleCounts,
+        /// "ok" when both windows had samples; "no_data" otherwise.
+        status: String,
+    },
+}
+
+/// Number of HRV samples that fell in each window. The Mac uses these to
+/// decide whether a delta is trustworthy (1 sample either side is noisy).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HrvSampleCounts {
+    pub pre: u32,
+    pub post: u32,
 }
 
 /// A message from the Mac to the phone.
@@ -179,6 +210,61 @@ mod tests {
         let raw = r#"{"type":"surprise","value":42}"#;
         let r: Result<ServerMessage, _> = serde_json::from_str(raw);
         assert!(r.is_err(), "unknown types must not silently decode");
+    }
+
+    #[test]
+    fn hrv_result_serializes_with_optional_fields() {
+        let m = ClientMessage::HrvResult {
+            session_id: "sess-1".into(),
+            pre_ms: Some(42.5),
+            post_ms: Some(48.0),
+            delta_ms: Some(5.5),
+            sample_counts: HrvSampleCounts { pre: 3, post: 4 },
+            status: "ok".into(),
+        };
+        let s = serde_json::to_string(&m).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(v["type"], "hrv_result");
+        assert_eq!(v["session_id"], "sess-1");
+        assert_eq!(v["pre_ms"], 42.5);
+        assert_eq!(v["post_ms"], 48.0);
+        assert_eq!(v["delta_ms"], 5.5);
+        assert_eq!(v["sample_counts"]["pre"], 3);
+        assert_eq!(v["sample_counts"]["post"], 4);
+        assert_eq!(v["status"], "ok");
+    }
+
+    #[test]
+    fn hrv_result_no_data_omits_numeric_fields() {
+        let m = ClientMessage::HrvResult {
+            session_id: "sess-2".into(),
+            pre_ms: None,
+            post_ms: None,
+            delta_ms: None,
+            sample_counts: HrvSampleCounts { pre: 0, post: 0 },
+            status: "no_data".into(),
+        };
+        let s = serde_json::to_string(&m).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert!(v.get("pre_ms").is_none());
+        assert!(v.get("post_ms").is_none());
+        assert!(v.get("delta_ms").is_none());
+        assert_eq!(v["status"], "no_data");
+    }
+
+    #[test]
+    fn hrv_result_round_trips_through_decode() {
+        let m = ClientMessage::HrvResult {
+            session_id: "sess-3".into(),
+            pre_ms: Some(40.0),
+            post_ms: Some(45.0),
+            delta_ms: Some(5.0),
+            sample_counts: HrvSampleCounts { pre: 2, post: 3 },
+            status: "ok".into(),
+        };
+        let s = serde_json::to_string(&m).unwrap();
+        let back: ClientMessage = serde_json::from_str(&s).unwrap();
+        assert_eq!(m, back);
     }
 
     #[test]

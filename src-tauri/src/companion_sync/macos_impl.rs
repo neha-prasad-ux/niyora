@@ -389,31 +389,83 @@ impl CompanionSync {
         }
         self.emit_state().await;
 
-        // 6. Live window stream. The broadcast loses messages to lagging
-        // peers · the queue covers the gap for any window they missed.
+        // 6. Live loop. Two things happen concurrently:
+        //   - We push freshly produced session windows from the broadcast.
+        //   - We receive `hrv_result` frames from the phone for previously
+        //     sent windows. M4 (this PR) only logs them; M7's My Soul work
+        //     is what stores and surfaces the delta against the session.
         let mut rx = self.live_tx.subscribe();
+        let mut incoming = String::new();
         loop {
-            let msg = match rx.recv().await {
-                Ok(m) => m,
-                Err(broadcast::error::RecvError::Lagged(n)) => {
-                    eprintln!("[companion_sync] peer {addr} lagged {n} message(s)");
-                    continue;
+            tokio::select! {
+                read = reader.read_line(&mut incoming) => {
+                    match read {
+                        Ok(0) => return Ok(()),
+                        Ok(_) => {
+                            let trimmed = incoming.trim();
+                            if trimmed.is_empty() {
+                                incoming.clear();
+                                continue;
+                            }
+                            match serde_json::from_str::<ClientMessage>(trimmed) {
+                                Ok(ClientMessage::HrvResult {
+                                    session_id,
+                                    pre_ms,
+                                    post_ms,
+                                    delta_ms,
+                                    sample_counts,
+                                    status,
+                                }) => {
+                                    eprintln!(
+                                        "[companion_sync] hrv_result session={session_id} \
+                                         pre={pre_ms:?} post={post_ms:?} delta={delta_ms:?} \
+                                         samples={}/{} status={status}",
+                                        sample_counts.pre, sample_counts.post
+                                    );
+                                    // Storage + My Soul surfacing land in
+                                    // the next PR; for now we acknowledge
+                                    // the message exists in the protocol.
+                                }
+                                Ok(other) => {
+                                    eprintln!("[companion_sync] unexpected post-auth frame: {other:?}");
+                                }
+                                Err(e) => {
+                                    eprintln!("[companion_sync] post-auth decode failed: {e}");
+                                    return Ok(());
+                                }
+                            }
+                            incoming.clear();
+                        }
+                        Err(e) => {
+                            eprintln!("[companion_sync] post-auth read failed: {e}");
+                            return Ok(());
+                        }
+                    }
                 }
-                Err(broadcast::error::RecvError::Closed) => return Ok(()),
-            };
-            if let ServerMessage::Window { ref session_id, .. } = msg {
-                if let Err(e) = write_message(&mut write_half, &msg).await {
-                    eprintln!("[companion_sync] live write failed: {e}");
-                    return Ok(());
+                recv = rx.recv() => {
+                    let msg = match recv {
+                        Ok(m) => m,
+                        Err(broadcast::error::RecvError::Lagged(n)) => {
+                            eprintln!("[companion_sync] peer {addr} lagged {n} message(s)");
+                            continue;
+                        }
+                        Err(broadcast::error::RecvError::Closed) => return Ok(()),
+                    };
+                    if let ServerMessage::Window { ref session_id, .. } = msg {
+                        if let Err(e) = write_message(&mut write_half, &msg).await {
+                            eprintln!("[companion_sync] live write failed: {e}");
+                            return Ok(());
+                        }
+                        let paired_ids: Vec<String> = state::load()
+                            .devices
+                            .iter()
+                            .map(|d| d.client_id.clone())
+                            .collect();
+                        queue::mark_sent_to(session_id, &client_id, &paired_ids).ok();
+                        state::touch_window_sent(&client_id, &now_rfc3339()).ok();
+                        self.emit_state().await;
+                    }
                 }
-                let paired_ids: Vec<String> = state::load()
-                    .devices
-                    .iter()
-                    .map(|d| d.client_id.clone())
-                    .collect();
-                queue::mark_sent_to(session_id, &client_id, &paired_ids).ok();
-                state::touch_window_sent(&client_id, &now_rfc3339()).ok();
-                self.emit_state().await;
             }
         }
     }
