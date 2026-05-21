@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { CompanionHrvChart } from "./CompanionHrvChart";
 
 interface PairedDevice {
   client_id: string;
@@ -168,6 +169,8 @@ export function CompanionCard() {
         >
           {devices.length === 0 ? "Pair your iPhone" : "Pair another iPhone"}
         </button>
+
+        {devices.length > 0 && <CompanionHrvChart />}
 
         {error !== null && <div className="companion-error">{error}</div>}
       </div>

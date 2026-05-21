@@ -273,6 +273,8 @@ fn main() {
             companion_sync::commands::companion_cancel_pairing,
             #[cfg(target_os = "macos")]
             companion_sync::commands::companion_unpair,
+            #[cfg(target_os = "macos")]
+            companion_sync::commands::companion_hrv_history,
         ])
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_opener::init())

@@ -9,6 +9,7 @@ use qrcode::QrCode;
 use serde::Serialize;
 use tauri::State;
 
+use super::history::{self, HrvReading};
 use super::macos_impl::{CompanionStatus, CompanionSync};
 
 #[derive(Debug, Clone, Serialize)]
@@ -62,6 +63,11 @@ pub async fn companion_unpair(
     sync: State<'_, CompanionSync>,
 ) -> Result<(), String> {
     sync.unpair(&client_id).await
+}
+
+#[tauri::command]
+pub fn companion_hrv_history() -> Vec<HrvReading> {
+    history::load().readings
 }
 
 #[cfg(test)]
