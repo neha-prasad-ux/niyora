@@ -17,6 +17,8 @@ interface Slide {
   /** "consent" renders the analytics opt-in slide: a detail panel plus two
    * explicit buttons instead of click-anywhere-to-advance. */
   kind?: "consent";
+  /** Bold heading line at the top of the note panel. */
+  noteHead?: string;
   /** Secondary detail text, rendered in a panel below the body. */
   note?: string;
 }
@@ -37,8 +39,8 @@ const SLIDES: Slide[] = [
   {
     kind: "consent",
     title: "Private by design",
-    body: "Niyora runs entirely on your Mac. Anonymous analytics are optional.",
-    note: "Sharing anonymous analytics helps improve reliability and future updates. No breathing data, no stress scores, no personal information is ever collected.",
+    noteHead: "Built independently, shaped by you.",
+    note: "Anonymous usage tells us what to make better next.\n\nStress scores, breath patterns, anything that identifies you. None of it leaves your Mac.",
   },
 ];
 
@@ -126,19 +128,29 @@ export default function Onboarding({ onDone }: Props) {
         {/* Middle: the slide content. Keyed on index so React re-mounts
             and the fade-in animation re-plays each transition. */}
         <div key={index} className="onboarding-slide">
-          <img
-            src="/icons/niyora-logo.png"
-            alt="Niyora"
-            className="onboarding-logo"
-            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-          />
+          {isConsent ? (
+            <svg className="onboarding-lock-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="4" y="11" width="16" height="10" rx="2" />
+              <path d="M8 11 V7 a4 4 0 0 1 8 0 V11" />
+            </svg>
+          ) : (
+            <img
+              src="/icons/niyora-logo.png"
+              alt="Niyora"
+              className="onboarding-logo"
+              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+            />
+          )}
           {slide.eyebrow && (
             <div className="onboarding-eyebrow">{slide.eyebrow}</div>
           )}
           <div className="onboarding-title">{slide.title}</div>
           {slide.body && <div className="onboarding-body">{slide.body}</div>}
-          {slide.note && (
-            <div className="onboarding-note">{slide.note}</div>
+          {(slide.note || slide.noteHead) && (
+            <div className="onboarding-note">
+              {slide.noteHead && <div className="onboarding-note-head">{slide.noteHead}</div>}
+              {slide.note}
+            </div>
           )}
           {slide.bullets && (
             <ul className="onboarding-checklist">

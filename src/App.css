@@ -1463,7 +1463,7 @@ html, body, #root {
   box-shadow: 0 4px 14px hsla(270, 50%, 40%, 0.2);
 }
 
-/* Analytics consent detail panel. the "what we don't collect" reassurance. */
+/* Analytics consent detail panel. */
 .onboarding-note {
   margin-top: 14px;
   padding: 12px 14px;
@@ -1475,6 +1475,19 @@ html, body, #root {
   line-height: 1.5;
   color: rgba(255, 255, 255, 0.62);
   text-align: left;
+  white-space: pre-line;
+}
+.onboarding-note-head {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+  margin-bottom: 6px;
+}
+
+/* Lock icon on the consent slide replaces the Niyora logo for visual signal. */
+.onboarding-lock-icon {
+  color: rgba(255, 255, 255, 0.92);
+  margin-bottom: 18px;
+  filter: drop-shadow(0 0 12px hsla(265, 50%, 65%, 0.25));
 }
 
 /* Consent slide: stacked primary + secondary buttons. */
@@ -1486,8 +1499,8 @@ html, body, #root {
 }
 .onboarding-consent-actions .onboarding-btn {
   width: 100%;
-  padding-left: 0;
-  padding-right: 0;
+  box-sizing: border-box;
+  padding: 12px 24px;
 }
 .onboarding-consent-actions .onboarding-btn:first-child {
   margin-top: 20px;
