@@ -1,22 +1,37 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { scoreToBallGradient } from "./useSnapshot";
+import PostSessionReveal from "./PostSessionReveal";
 
 interface Props {
   onDone: () => void;
   /** Bound to the session that just finished, so a post-tap captures into
    *  the same history row as any pre-session capture. */
   sessionId: string;
+  /** Open My Soul · invoked when the user taps the trend strip in the
+   *  reveal screen. */
+  onSeeSoul: () => void;
 }
 
 const DOT_LABELS = ["Tense", "Heavy", "Neutral", "Settled", "Calm"];
 
-type Phase = "ask" | "thanks";
+interface PhaseStatus {
+  status: string;
+}
+interface HrvReading {
+  session_id: string;
+  pre: PhaseStatus | null;
+  post: PhaseStatus | null;
+}
 
-export default function PostSessionMood({ onDone, sessionId }: Props) {
+type Phase = "ask" | "thanks" | "reveal";
+
+export default function PostSessionMood({ onDone, sessionId, onSeeSoul }: Props) {
   const [phase, setPhase] = useState<Phase>("ask");
   const [companionPaired, setCompanionPaired] = useState(false);
   const [postPulseSent, setPostPulseSent] = useState(false);
+  const [hasBothCaptures, setHasBothCaptures] = useState(false);
 
   // We deliberately do not store the user's answer. The dots exist as a
   // moment of self-reflection, nothing more. The closing screen is the
@@ -32,6 +47,37 @@ export default function PostSessionMood({ onDone, sessionId }: Props) {
       .then((s) => setCompanionPaired((s.paired_devices?.length ?? 0) > 0))
       .catch(() => setCompanionPaired(false));
   }, []);
+
+  // Subscribe to companion history updates. When both pre and post land
+  // for this session, swap from the mood-dots view to the reveal view ·
+  // the moment is the payoff for taking both measurements.
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      invoke<HrvReading[]>("companion_hrv_history")
+        .then((rs) => {
+          if (cancelled) return;
+          const r = rs.find((row) => row.session_id === sessionId);
+          if (
+            r &&
+            r.pre?.status === "ok" &&
+            r.post?.status === "ok"
+          ) {
+            setHasBothCaptures(true);
+            setPhase("reveal");
+          }
+        })
+        .catch(() => {
+          /* best-effort */
+        });
+    };
+    refresh();
+    const unlisten = listen("companion://state", refresh);
+    return () => {
+      cancelled = true;
+      unlisten.then((u) => u()).catch(() => {});
+    };
+  }, [sessionId]);
 
   const requestPostMeasurement = useCallback(() => {
     if (postPulseSent) return;
@@ -51,9 +97,28 @@ export default function PostSessionMood({ onDone, sessionId }: Props) {
 
   useEffect(() => {
     if (phase !== "thanks") return;
+    // If the user tapped Measure stress and the post result has not yet
+    // arrived, keep the panel open so the reveal can take over once both
+    // captures land. The reveal effect above will swap phase from
+    // "thanks" to "reveal" when that happens, and this effect's cleanup
+    // cancels any pending dismissal.
+    if (postPulseSent && !hasBothCaptures) return;
     const t = setTimeout(onDone, 2800);
     return () => clearTimeout(t);
-  }, [phase, onDone]);
+  }, [phase, onDone, postPulseSent, hasBothCaptures]);
+
+  // Reveal flow takes over the panel · its own Done button drives the
+  // dismissal, the mood-dots auto-dismiss timer doesn't apply.
+  if (phase === "reveal" && hasBothCaptures) {
+    return (
+      <PostSessionReveal
+        sessionId={sessionId}
+        onDone={onDone}
+        onLearnMore={onDone}
+        onSeeSoul={onSeeSoul}
+      />
+    );
+  }
 
   // Always the calm-tier orb. The "after" ball is the visual reward — it
   // signals "you brought yourself to a settled state" regardless of the

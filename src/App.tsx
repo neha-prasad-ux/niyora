@@ -163,7 +163,13 @@ function App() {
   }
 
   if (view === "mood") {
-    return <PostSessionMood onDone={handleMoodDone} sessionId={sessionId} />;
+    return (
+      <PostSessionMood
+        onDone={handleMoodDone}
+        sessionId={sessionId}
+        onSeeSoul={() => setView("settings")}
+      />
+    );
   }
 
   if (view === "pss4") {
