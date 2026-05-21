@@ -112,6 +112,22 @@ export default function Settings({ onBack, onOpenPss4 }: Props) {
     });
   }, []);
 
+  // Analytics consent: `null` while loading or if the backend is unavailable,
+  // then `true` / `false` per the onboarding choice. Saved immediately on toggle.
+  const [analyticsOn, setAnalyticsOn] = useState<boolean | null>(null);
+  useEffect(() => {
+    invoke<boolean | null>("analytics_consent_status")
+      .then((v) => setAnalyticsOn(v))
+      .catch(() => setAnalyticsOn(null));
+  }, []);
+  const toggleAnalytics = (next: boolean) => {
+    setAnalyticsOn(next);
+    invoke("set_analytics_consent", { granted: next }).catch(() => {
+      /* revert on failure so UI matches backend state */
+      setAnalyticsOn(!next);
+    });
+  };
+
   const [pss4History, setPss4History] = useState<Pss4Entry[]>([]);
   useEffect(() => {
     let cancelled = false;
@@ -252,6 +268,25 @@ export default function Settings({ onBack, onOpenPss4 }: Props) {
         </div>
 
         <CompanionCard />
+
+        <div className="soul-card soul-card-toggle">
+          <div className="soul-toggle-row">
+            <div className="soul-toggle-text">
+              <div className="soul-cta-title">Anonymous analytics</div>
+              <div className="soul-cta-blurb">
+                Helps shape what to improve next. Stress scores, breath patterns, and anything that identifies you stay on your Mac.
+              </div>
+            </div>
+            <label className="soul-switch" aria-label="Toggle anonymous analytics">
+              <input
+                type="checkbox"
+                checked={analyticsOn === true}
+                onChange={(e) => toggleAnalytics(e.target.checked)}
+              />
+              <span className="soul-switch-track" />
+            </label>
+          </div>
+        </div>
 
         <div className="soul-card soul-card-cta">
           <div className="soul-cta-title">Message the founder</div>
