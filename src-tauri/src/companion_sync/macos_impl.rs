@@ -32,12 +32,12 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, Mutex};
 
-use super::history::HrvReading;
+use super::history::{Phase, PhaseCapture};
 use super::pairing::PairingManager;
 use super::protocol::{ClientMessage, QrPayload, ServerMessage, PROTOCOL_VERSION};
-use super::queue::QueuedWindow;
+use super::queue::QueuedRequest;
 use super::state::PairedDevice;
-use super::{history, keychain, queue, state, SessionWindow};
+use super::{history, keychain, queue, state, MeasurementRequest};
 
 const SERVICE_TYPE: &str = "_niyora._tcp.local.";
 const INSTANCE_NAME: &str = "Niyora";
@@ -61,7 +61,7 @@ pub struct CompanionStatus {
 
 /// Cloneable handle held in Tauri state. The inner Arc<Mutex<..>> holds
 /// pairing manager state and the latest QR endpoint; the broadcast Sender
-/// is a separate field so live `enqueue_window` calls are lock-free.
+/// is a separate field so live `enqueue_request` calls are lock-free.
 #[derive(Clone)]
 pub struct CompanionSync {
     inner: Arc<Mutex<Inner>>,
@@ -81,27 +81,31 @@ struct Inner {
 }
 
 impl CompanionSync {
-    /// Persist a window to the on-disk queue and try to fan it out to any
-    /// live authed peers. Never blocks the caller. The queue is the source
-    /// of truth · the broadcast is just a fast path for the case where a
-    /// phone happens to be connected.
-    pub fn enqueue_window(&self, window: SessionWindow) {
-        let qw = QueuedWindow {
-            session_id: window.session_id.clone(),
-            start: window.start.clone(),
-            end: window.end.clone(),
-            technique_name: window.technique_name.clone(),
+    /// Persist a measurement request to the on-disk queue and try to fan
+    /// it out to any live authed peers. Never blocks the caller. The
+    /// queue is the source of truth · the broadcast is just a fast path
+    /// for the case where a phone happens to be connected. Invalid
+    /// `phase` values are dropped silently · the frontend validates
+    /// before it ever gets here.
+    pub fn enqueue_request(&self, req: MeasurementRequest) {
+        if Phase::parse(&req.phase).is_none() {
+            eprintln!("[companion_sync] enqueue_request: bad phase {:?}", req.phase);
+            return;
+        }
+        let qw = QueuedRequest {
+            session_id: req.session_id.clone(),
+            phase: req.phase.clone(),
+            technique_name: req.technique_name.clone(),
             queued_at: now_rfc3339(),
             sent_to: Default::default(),
         };
         if let Err(e) = queue::enqueue(qw) {
             eprintln!("[companion_sync] queue enqueue failed: {e}");
         }
-        let _ = self.live_tx.send(ServerMessage::Window {
-            session_id: window.session_id,
-            start: window.start,
-            end: window.end,
-            technique_name: window.technique_name,
+        let _ = self.live_tx.send(ServerMessage::RequestMeasurement {
+            session_id: req.session_id,
+            phase: req.phase,
+            technique_name: req.technique_name,
         });
     }
 
@@ -375,7 +379,7 @@ impl CompanionSync {
 
         // 5. Drain the queue for this client_id.
         for entry in queue::pending_for(&client_id) {
-            let msg = queue::to_window_message(&entry);
+            let msg = queue::to_request_message(&entry);
             if let Err(e) = write_message(&mut write_half, &msg).await {
                 eprintln!("[companion_sync] drain write failed: {e}");
                 return Ok(());
@@ -385,16 +389,17 @@ impl CompanionSync {
                 .iter()
                 .map(|d| d.client_id.clone())
                 .collect();
-            queue::mark_sent_to(&entry.session_id, &client_id, &paired_ids).ok();
+            queue::mark_sent_to(&entry.session_id, &entry.phase, &client_id, &paired_ids).ok();
             state::touch_window_sent(&client_id, &now_rfc3339()).ok();
         }
         self.emit_state().await;
 
         // 6. Live loop. Two things happen concurrently:
-        //   - We push freshly produced session windows from the broadcast.
+        //   - We push freshly tapped measurement requests from the
+        //     broadcast.
         //   - We receive `hrv_result` frames from the phone for previously
-        //     sent windows. M4 (this PR) only logs them; M7's My Soul work
-        //     is what stores and surfaces the delta against the session.
+        //     sent requests. Each frame is merged into the per-session
+        //     history row by (session_id, phase).
         let mut rx = self.live_tx.subscribe();
         let mut incoming = String::new();
         loop {
@@ -411,30 +416,33 @@ impl CompanionSync {
                             match serde_json::from_str::<ClientMessage>(trimmed) {
                                 Ok(ClientMessage::HrvResult {
                                     session_id,
-                                    pre_ms,
-                                    post_ms,
-                                    delta_ms,
-                                    sample_counts,
+                                    phase,
+                                    rmssd_ms,
+                                    sdnn_ms,
+                                    sample_count,
+                                    snr_db,
                                     status,
                                 }) => {
                                     eprintln!(
                                         "[companion_sync] hrv_result session={session_id} \
-                                         pre={pre_ms:?} post={post_ms:?} delta={delta_ms:?} \
-                                         samples={}/{} status={status}",
-                                        sample_counts.pre, sample_counts.post
+                                         phase={phase} rmssd={rmssd_ms:?} sdnn={sdnn_ms:?} \
+                                         samples={sample_count} snr_db={snr_db:?} status={status}"
                                     );
-                                    let reading = HrvReading {
-                                        received_at: now_rfc3339(),
-                                        session_id,
-                                        pre_ms,
-                                        post_ms,
-                                        delta_ms,
-                                        samples_pre: sample_counts.pre,
-                                        samples_post: sample_counts.post,
-                                        status,
+                                    let Some(p) = Phase::parse(&phase) else {
+                                        eprintln!("[companion_sync] bad phase {phase:?}");
+                                        incoming.clear();
+                                        continue;
                                     };
-                                    if let Err(e) = history::record(reading) {
-                                        eprintln!("[companion_sync] history record failed: {e}");
+                                    let capture = PhaseCapture {
+                                        rmssd_ms,
+                                        sdnn_ms,
+                                        sample_count,
+                                        snr_db,
+                                        status,
+                                        received_at: now_rfc3339(),
+                                    };
+                                    if let Err(e) = history::merge(&session_id, p, capture) {
+                                        eprintln!("[companion_sync] history merge failed: {e}");
                                     }
                                     self.emit_state().await;
                                 }
@@ -463,7 +471,12 @@ impl CompanionSync {
                         }
                         Err(broadcast::error::RecvError::Closed) => return Ok(()),
                     };
-                    if let ServerMessage::Window { ref session_id, .. } = msg {
+                    if let ServerMessage::RequestMeasurement {
+                        ref session_id,
+                        ref phase,
+                        ..
+                    } = msg
+                    {
                         if let Err(e) = write_message(&mut write_half, &msg).await {
                             eprintln!("[companion_sync] live write failed: {e}");
                             return Ok(());
@@ -473,7 +486,7 @@ impl CompanionSync {
                             .iter()
                             .map(|d| d.client_id.clone())
                             .collect();
-                        queue::mark_sent_to(session_id, &client_id, &paired_ids).ok();
+                        queue::mark_sent_to(session_id, phase, &client_id, &paired_ids).ok();
                         state::touch_window_sent(&client_id, &now_rfc3339()).ok();
                         self.emit_state().await;
                     }

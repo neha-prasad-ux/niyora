@@ -79,6 +79,15 @@ function App() {
   // (new random technique, intro reset, etc.) on every tray click — without
   // reloading the whole page.
   const [openKey, setOpenKey] = useState(0);
+  // Stable id for the session a breathing-view mount represents. Minted
+  // once per openKey so the pre-session "Measure stress" tap, the
+  // record_session call when rounds finish, and the post-mood "Measure
+  // stress" tap all agree on which row the iPhone's PPG capture binds
+  // to. Crypto-strong UUID via the browser API (no extra dep).
+  const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID());
+  useEffect(() => {
+    setSessionId(crypto.randomUUID());
+  }, [openKey]);
   // True for the very first panel open of each local day. Drives the
   // "Start your day with a breath." intro copy and forces Box Breath so the
   // promise of ~60s holds.
@@ -154,7 +163,7 @@ function App() {
   }
 
   if (view === "mood") {
-    return <PostSessionMood onDone={handleMoodDone} />;
+    return <PostSessionMood onDone={handleMoodDone} sessionId={sessionId} />;
   }
 
   if (view === "pss4") {
@@ -165,6 +174,7 @@ function App() {
     <div style={{ position: "relative", width: "100%", height: "100%" }}>
       <BreathingSession
         key={openKey}
+        sessionId={sessionId}
         onComplete={handleSessionComplete}
         snapshot={snapshot}
         completedSessions={stats.completed}

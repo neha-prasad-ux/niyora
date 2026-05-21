@@ -2,11 +2,9 @@ use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Duration, Utc};
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::companion_sync::{CompanionSync, SessionWindow};
 use crate::config;
 
 /// Append-only JSONL log of breathing/mindfulness sessions, one per line.
@@ -20,10 +18,11 @@ fn sessions_path() -> Option<PathBuf> {
 /// Append a session record to the given file. Pure function for testability ·
 /// the Tauri command wraps this with the production path.
 ///
-/// `session_id` is a stable UUID minted at record time. It is persisted in
-/// the JSONL so the HRV companion can refer to a session by ID when it
-/// reports back HRV deltas. Older rows without `session_id` predate the
-/// companion feature and need no migration.
+/// `session_id` is a stable UUID the frontend mints when the breathing
+/// info screen opens, so the "Measure stress" pre-session tap and the
+/// later record_session call agree on which row to bind HRV results to.
+/// Older rows without `session_id` predate the companion feature and
+/// need no migration.
 #[allow(clippy::too_many_arguments)]
 fn append_session_line(
     path: &Path,
@@ -54,17 +53,6 @@ fn append_session_line(
     Ok(())
 }
 
-/// Compute the RFC 3339 end timestamp given an RFC 3339 start and a duration
-/// in seconds. Returns `None` if the start string cannot be parsed; in that
-/// case callers skip the companion emit rather than send a bogus window.
-fn compute_end(started_at: &str, actual_duration_sec: u64) -> Option<String> {
-    let start: DateTime<Utc> = DateTime::parse_from_rfc3339(started_at)
-        .ok()?
-        .with_timezone(&Utc);
-    let end = start.checked_add_signed(Duration::seconds(actual_duration_sec as i64))?;
-    Some(end.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
-}
-
 /// Record a completed or abandoned session.
 ///
 /// Called from the frontend on:
@@ -72,18 +60,21 @@ fn compute_end(started_at: &str, actual_duration_sec: u64) -> Option<String> {
 ///   - early close past the intro (abandoned)
 ///
 /// Closes during the 3s intro are not recorded — the user didn't really start.
+///
+/// The frontend supplies `session_id` so that any companion measurement
+/// requests fired earlier in the same session (e.g. a pre-session
+/// "Measure stress" tap) reference the same id the JSONL row will carry.
 #[tauri::command]
 pub fn record_session(
+    session_id: String,
     started_at: String,
     technique_name: String,
     technique_kind: String,
     intended_duration_sec: u64,
     actual_duration_sec: u64,
     completed: bool,
-    companion: tauri::State<'_, CompanionSync>,
 ) -> Result<(), String> {
     let path = sessions_path().ok_or_else(|| "Could not resolve sessions path".to_string())?;
-    let session_id = uuid::Uuid::new_v4().to_string();
     append_session_line(
         &path,
         &session_id,
@@ -106,21 +97,6 @@ pub fn record_session(
             "completed": completed,
         }),
     );
-
-    // Emit to the HRV companion only for completed sessions. Abandoned
-    // sessions are not interesting for HRV impact measurement because the
-    // user did not finish the practice. If `started_at` is malformed we
-    // skip the emit silently rather than send a window with no `end`.
-    if completed {
-        if let Some(end) = compute_end(&started_at, actual_duration_sec) {
-            companion.enqueue_window(SessionWindow {
-                session_id,
-                start: started_at,
-                end,
-                technique_name,
-            });
-        }
-    }
 
     Ok(())
 }
@@ -304,16 +280,4 @@ mod tests {
         fs::remove_file(&path).ok();
     }
 
-    #[test]
-    fn compute_end_adds_actual_duration_to_start() {
-        // 64s session ending one minute and four seconds after start.
-        let end = compute_end("2026-05-20T10:00:00Z", 64).expect("valid RFC 3339 in");
-        assert_eq!(end, "2026-05-20T10:01:04Z");
-    }
-
-    #[test]
-    fn compute_end_returns_none_on_bad_start() {
-        assert!(compute_end("not a date", 60).is_none());
-        assert!(compute_end("", 60).is_none());
-    }
 }
