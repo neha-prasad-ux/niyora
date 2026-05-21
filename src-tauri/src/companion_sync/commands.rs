@@ -97,6 +97,43 @@ pub async fn companion_request_measurement(
     Ok(())
 }
 
+/// Dev-only · writes a synthetic pre+post pair into the companion HRV
+/// history for `session_id` so the post-session reveal screen can be
+/// previewed without going through the iPhone PPG flow. Gated to debug
+/// builds; the command is not even compiled into release.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub async fn companion_inject_synthetic_reveal(
+    session_id: String,
+    pre_rmssd_ms: f64,
+    post_rmssd_ms: f64,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    use chrono::Utc;
+    use tauri::Emitter;
+    let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let pre = history::PhaseCapture {
+        rmssd_ms: Some(pre_rmssd_ms),
+        sdnn_ms: Some(pre_rmssd_ms * 0.9),
+        sample_count: 28,
+        snr_db: Some(10.0),
+        status: "ok".into(),
+        received_at: now.clone(),
+    };
+    let post = history::PhaseCapture {
+        rmssd_ms: Some(post_rmssd_ms),
+        sdnn_ms: Some(post_rmssd_ms * 0.9),
+        sample_count: 28,
+        snr_db: Some(10.0),
+        status: "ok".into(),
+        received_at: now,
+    };
+    history::merge(&session_id, history::Phase::Pre, pre)?;
+    history::merge(&session_id, history::Phase::Post, post)?;
+    let _ = app.emit("companion://state", serde_json::json!({"synthetic": true}));
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

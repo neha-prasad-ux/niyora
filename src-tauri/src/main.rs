@@ -277,6 +277,8 @@ fn main() {
             companion_sync::commands::companion_hrv_history,
             #[cfg(target_os = "macos")]
             companion_sync::commands::companion_request_measurement,
+            #[cfg(all(target_os = "macos", debug_assertions))]
+            companion_sync::commands::companion_inject_synthetic_reveal,
         ])
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_opener::init())

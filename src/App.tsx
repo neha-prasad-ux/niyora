@@ -198,7 +198,22 @@ function App() {
         </svg>
       </button>
       {import.meta.env.DEV && (
-        <DevControls current={devStress} onSet={setDevStress} />
+        <DevControls
+          current={devStress}
+          onSet={setDevStress}
+          onPreviewReveal={() => {
+            // Synthesize a calm-rising session (RMSSD 42 → 58) and jump
+            // to the mood view; the reveal effect there will detect the
+            // injected row and swap to PostSessionReveal.
+            invoke("companion_inject_synthetic_reveal", {
+              sessionId,
+              preRmssdMs: 42,
+              postRmssdMs: 58,
+            })
+              .then(() => setView("mood"))
+              .catch((e) => console.warn("[dev preview]", e));
+          }}
+        />
       )}
     </div>
   );
