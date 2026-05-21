@@ -151,7 +151,7 @@ export function CompanionCard() {
                   </button>
                 </div>
                 <div className="companion-device-meta">
-                  Last window sent {relativeTime(d.last_window_sent_at)}
+                  Last sent {relativeTime(d.last_window_sent_at)}
                 </div>
               </div>
             ))}

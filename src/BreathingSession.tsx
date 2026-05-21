@@ -445,6 +445,10 @@ function useButtonParticles() {
 // COMPONENT
 // =====================================================================
 interface Props {
+  /** Stable id for this session, minted by App.tsx so the pre-session
+   *  "Measure stress" tap, the record_session call, and the post-mood
+   *  "Measure stress" tap all bind to the same row. */
+  sessionId: string;
   onComplete: () => void;
   snapshot?: SituationalSnapshot | null;
   completedSessions?: number;
@@ -453,7 +457,7 @@ interface Props {
   isFirstOpenToday?: boolean;
 }
 
-export default function BreathingSession({ onComplete, snapshot, completedSessions, isFirstOpenToday }: Props) {
+export default function BreathingSession({ sessionId, onComplete, snapshot, completedSessions, isFirstOpenToday }: Props) {
   WIDTH = LG_WIDTH;
   HEIGHT = LG_HEIGHT;
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -473,6 +477,13 @@ export default function BreathingSession({ onComplete, snapshot, completedSessio
   // Once the user picks a technique from "Try a different one", drop the
   // day-start framing and show the real technique name/subtitle.
   const [showDayStart, setShowDayStart] = useState(!!isFirstOpenToday);
+  // Companion state · the "Measure stress" button only renders when
+  // there is at least one paired iPhone (otherwise the button would do
+  // nothing and confuse users who never paired). Polled lazily on mount
+  // because companion_status is a cheap local call. `prePulseSent`
+  // suppresses repeat taps in the same info screen.
+  const [companionPaired, setCompanionPaired] = useState(false);
+  const [prePulseSent, setPrePulseSent] = useState(false);
 
   // Compute which techniques are locked at the user's current tier.
   const userTier = currentTier(completedSessions ?? 0);
@@ -523,6 +534,7 @@ export default function BreathingSession({ onComplete, snapshot, completedSessio
     loggedRef.current = true;
     const actualSec = Math.max(0, Math.round((performance.now() - info.startTimeMs) / 1000));
     invoke("record_session", {
+      sessionId,
       startedAt: info.startedAt,
       techniqueName: info.techniqueName,
       techniqueKind: info.techniqueKind,
@@ -532,7 +544,27 @@ export default function BreathingSession({ onComplete, snapshot, completedSessio
     }).catch(() => {
       /* best-effort; never block UX on storage */
     });
+  }, [sessionId]);
+
+  useEffect(() => {
+    interface MinStatus { paired_devices?: { client_id: string }[] }
+    invoke<MinStatus>("companion_status")
+      .then((s) => setCompanionPaired((s.paired_devices?.length ?? 0) > 0))
+      .catch(() => setCompanionPaired(false));
   }, []);
+
+  const requestPreMeasurement = useCallback(() => {
+    if (prePulseSent) return;
+    setPrePulseSent(true);
+    invoke("companion_request_measurement", {
+      sessionId,
+      phase: "pre",
+      techniqueName: stateRef.current.technique.name,
+    }).catch(() => {
+      // Best-effort · if the phone is unreachable the request sits in
+      // the queue and drains on next connect. No surfaced error.
+    });
+  }, [prePulseSent, sessionId]);
 
   const handleBegin = useCallback(() => {
     btnParticles.stopEmitting();
@@ -1359,6 +1391,15 @@ export default function BreathingSession({ onComplete, snapshot, completedSessio
             >
               Try a different one
             </button>
+            {companionPaired && (
+              <button
+                className="info-fade-4 info-secondary-btn"
+                onClick={requestPreMeasurement}
+                disabled={transitioning || prePulseSent}
+              >
+                {prePulseSent ? "Sent to your iPhone" : "Measure stress"}
+              </button>
+            )}
           </div>
         </div>
       )}

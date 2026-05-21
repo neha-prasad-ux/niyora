@@ -1,4 +1,4 @@
-//! Wire protocol v1 between the Niyora Mac app and the Niyora Companion
+//! Wire protocol v2 between the Niyora Mac app and the Niyora Companion
 //! iPhone app. Each frame is one line of JSON over TCP (NDJSON). Every
 //! message carries a `type` discriminator. Unknown types are a fatal error
 //! and the connection is dropped, on the principle that a misaligned client
@@ -7,24 +7,33 @@
 //! Lifecycle from the phone's perspective:
 //!
 //! ```text
-//!   →  identify   {client_id, client_name, pairing_id?}
-//!   ←  hello      {server_id, server_name}
-//!   ←  challenge  {nonce_hex}
-//!   →  auth       {hmac_hex}                     // HMAC-SHA256(secret, nonce)
-//!   ←  authed     or   ← auth_failed (then close)
-//!   ←  window     {session_id, start, end, technique_name}   (one per session, queued or live)
+//!   →  identify             {client_id, client_name, pairing_id?}
+//!   ←  hello                {server_id, server_name}
+//!   ←  challenge            {nonce_hex}
+//!   →  auth                 {hmac_hex}                  // HMAC-SHA256(secret, nonce)
+//!   ←  authed   or   ← auth_failed (then close)
+//!   ←  request_measurement  {session_id, phase, technique_name}   (zero or more per session)
 //! ```
 //!
 //! `pairing_id` is only set on the first connect after a QR scan. The Mac
 //! holds the QR-issued secret and pairing_id in memory and binds them to
 //! the phone's `client_id` on receipt. Subsequent reconnects omit the
 //! `pairing_id` and auth via stored secret.
+//!
+//! v2 vs v1: the HealthKit-on-window auto-read path is gone. Sessions no
+//! longer auto-emit a window at end. Instead the user explicitly opts in
+//! to a 30s iPhone-camera PPG measurement via a "Measure stress" button,
+//! and the Mac emits one `request_measurement` per tap (phase = pre or
+//! post). The phone responds with `hrv_result` once it has computed RMSSD
+//! and SDNN from the green-channel pulse it captured.
 
 use serde::{Deserialize, Serialize};
 
-/// Wire-format protocol version. Bumped if any message shape changes in a
-/// way that is not additive (renamed field, removed field, changed type).
-pub const PROTOCOL_VERSION: u32 = 1;
+/// Wire-format protocol version. Bumped on any breaking shape change
+/// (renamed field, removed field, changed semantic). v2 dropped the
+/// HealthKit auto-read path and rewrote `HrvResult` around a single
+/// per-phase measurement.
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// A message from the phone to the Mac.
 /// `Eq` is not derived because `HrvResult` carries `f64` fields, which do
@@ -47,34 +56,40 @@ pub enum ClientMessage {
     /// case hex of `HMAC-SHA256(secret_bytes, nonce_bytes)` where the nonce
     /// is decoded from the hex string the server sent.
     Auth { hmac_hex: String },
-    /// HRV computed by the phone for a session window the Mac previously
-    /// sent. One per session_id. Fields are optional so the phone can
-    /// honestly report "no data this time" without inventing numbers,
-    /// matching the spec's "honest gaps" principle.
+    /// One PPG measurement the phone captured for a session. The Mac merges
+    /// pre and post frames sharing the same `session_id` into one history
+    /// row. Status reports the capture quality honestly · the spec's
+    /// "honest gaps" rule means a noisy capture is reported as such, not
+    /// papered over with a fabricated number.
     HrvResult {
         session_id: String,
-        /// Mean SDNN over the pre-session window, in milliseconds.
+        /// Which side of the breathing session this capture covers.
+        /// `"pre"` or `"post"`.
+        phase: String,
+        /// Root-mean-square of successive differences, the standard HRV
+        /// metric for short (~30s) PPG recordings. Primary signal.
         #[serde(skip_serializing_if = "Option::is_none")]
-        pre_ms: Option<f64>,
-        /// Mean SDNN over the post-session window, in milliseconds.
+        rmssd_ms: Option<f64>,
+        /// Standard deviation of inter-beat intervals, secondary signal.
+        /// Reported alongside RMSSD so future analysis can compare the two
+        /// without re-running captures.
         #[serde(skip_serializing_if = "Option::is_none")]
-        post_ms: Option<f64>,
-        /// post_ms - pre_ms. Convenience for the Mac so My Soul does not
-        /// have to compute the same arithmetic.
+        sdnn_ms: Option<f64>,
+        /// Number of inter-beat intervals detected in the capture.
+        sample_count: u32,
+        /// Estimated signal-to-noise ratio in decibels. Used by the phone
+        /// to decide whether to mark a capture as `low_signal`. Forwarded
+        /// to the Mac for future thresholds without another wire change.
         #[serde(skip_serializing_if = "Option::is_none")]
-        delta_ms: Option<f64>,
-        sample_counts: HrvSampleCounts,
-        /// "ok" when both windows had samples; "no_data" otherwise.
+        snr_db: Option<f64>,
+        /// `"ok"` · usable RMSSD + SDNN present.
+        /// `"low_signal"` · capture finished but SNR was below threshold.
+        /// `"finger_lifted"` · capture aborted because the lens lost
+        /// contact part-way through.
+        /// `"cancelled"` · the user dismissed the sheet before the 30s
+        /// elapsed.
         status: String,
     },
-}
-
-/// Number of HRV samples that fell in each window. The Mac uses these to
-/// decide whether a delta is trustworthy (1 sample either side is noisy).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct HrvSampleCounts {
-    pub pre: u32,
-    pub post: u32,
 }
 
 /// A message from the Mac to the phone.
@@ -95,14 +110,17 @@ pub enum ServerMessage {
     Authed,
     /// Auth failed. Connection will close after this frame.
     AuthFailed { reason: String },
-    /// One session window, either freshly produced or drained from the
-    /// queue. Idempotent: `session_id` is stable, the phone may receive
-    /// the same window twice across reconnects (queue replay) and must
-    /// dedupe by id.
-    Window {
+    /// Tells the phone to start a 30s PPG capture for one side of a
+    /// session. The Mac emits these only when the user taps "Measure
+    /// stress" on the pre-session info screen or the post-session mood
+    /// screen · they are never produced automatically. Idempotent on
+    /// `(session_id, phase)`: the phone dedupes if the same request
+    /// arrives twice across a reconnect (queue replay).
+    RequestMeasurement {
         session_id: String,
-        start: String,
-        end: String,
+        /// `"pre"` or `"post"`. The Mac does not assume one comes before
+        /// the other on the wire · queue replay can reorder them.
+        phase: String,
         technique_name: String,
     },
 }
@@ -150,7 +168,7 @@ mod tests {
     #[test]
     fn identify_serializes_with_type_tag() {
         let m = ClientMessage::Identify {
-            protocol: 1,
+            protocol: PROTOCOL_VERSION,
             client_id: "c-1".into(),
             client_name: "Neha's iPhone".into(),
             pairing_id: Some("p-1".into()),
@@ -160,13 +178,13 @@ mod tests {
         assert_eq!(v["type"], "identify");
         assert_eq!(v["client_id"], "c-1");
         assert_eq!(v["pairing_id"], "p-1");
-        assert_eq!(v["protocol"], 1);
+        assert_eq!(v["protocol"], PROTOCOL_VERSION);
     }
 
     #[test]
     fn identify_without_pairing_id_omits_field() {
         let m = ClientMessage::Identify {
-            protocol: 1,
+            protocol: PROTOCOL_VERSION,
             client_id: "c-1".into(),
             client_name: "Neha's iPhone".into(),
             pairing_id: None,
@@ -180,7 +198,7 @@ mod tests {
     fn server_messages_round_trip() {
         let cases = [
             ServerMessage::Hello {
-                protocol: 1,
+                protocol: PROTOCOL_VERSION,
                 server_id: "s-1".into(),
                 server_name: "Neha's MacBook".into(),
             },
@@ -191,10 +209,14 @@ mod tests {
             ServerMessage::AuthFailed {
                 reason: "bad hmac".into(),
             },
-            ServerMessage::Window {
+            ServerMessage::RequestMeasurement {
                 session_id: "sess-1".into(),
-                start: "2026-05-20T10:00:00Z".into(),
-                end: "2026-05-20T10:01:00Z".into(),
+                phase: "pre".into(),
+                technique_name: "Box Breathing".into(),
+            },
+            ServerMessage::RequestMeasurement {
+                session_id: "sess-1".into(),
+                phase: "post".into(),
                 technique_name: "Box Breathing".into(),
             },
         ];
@@ -213,53 +235,71 @@ mod tests {
     }
 
     #[test]
+    fn request_measurement_uses_snake_case_tag() {
+        let m = ServerMessage::RequestMeasurement {
+            session_id: "sess-1".into(),
+            phase: "pre".into(),
+            technique_name: "Box Breathing".into(),
+        };
+        let s = serde_json::to_string(&m).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(v["type"], "request_measurement");
+        assert_eq!(v["session_id"], "sess-1");
+        assert_eq!(v["phase"], "pre");
+        assert_eq!(v["technique_name"], "Box Breathing");
+    }
+
+    #[test]
     fn hrv_result_serializes_with_optional_fields() {
         let m = ClientMessage::HrvResult {
             session_id: "sess-1".into(),
-            pre_ms: Some(42.5),
-            post_ms: Some(48.0),
-            delta_ms: Some(5.5),
-            sample_counts: HrvSampleCounts { pre: 3, post: 4 },
+            phase: "post".into(),
+            rmssd_ms: Some(48.0),
+            sdnn_ms: Some(42.5),
+            sample_count: 28,
+            snr_db: Some(11.2),
             status: "ok".into(),
         };
         let s = serde_json::to_string(&m).unwrap();
         let v: serde_json::Value = serde_json::from_str(&s).unwrap();
         assert_eq!(v["type"], "hrv_result");
         assert_eq!(v["session_id"], "sess-1");
-        assert_eq!(v["pre_ms"], 42.5);
-        assert_eq!(v["post_ms"], 48.0);
-        assert_eq!(v["delta_ms"], 5.5);
-        assert_eq!(v["sample_counts"]["pre"], 3);
-        assert_eq!(v["sample_counts"]["post"], 4);
+        assert_eq!(v["phase"], "post");
+        assert_eq!(v["rmssd_ms"], 48.0);
+        assert_eq!(v["sdnn_ms"], 42.5);
+        assert_eq!(v["sample_count"], 28);
+        assert_eq!(v["snr_db"], 11.2);
         assert_eq!(v["status"], "ok");
     }
 
     #[test]
-    fn hrv_result_no_data_omits_numeric_fields() {
+    fn hrv_result_low_signal_omits_metric_fields() {
         let m = ClientMessage::HrvResult {
             session_id: "sess-2".into(),
-            pre_ms: None,
-            post_ms: None,
-            delta_ms: None,
-            sample_counts: HrvSampleCounts { pre: 0, post: 0 },
-            status: "no_data".into(),
+            phase: "pre".into(),
+            rmssd_ms: None,
+            sdnn_ms: None,
+            sample_count: 0,
+            snr_db: Some(3.1),
+            status: "low_signal".into(),
         };
         let s = serde_json::to_string(&m).unwrap();
         let v: serde_json::Value = serde_json::from_str(&s).unwrap();
-        assert!(v.get("pre_ms").is_none());
-        assert!(v.get("post_ms").is_none());
-        assert!(v.get("delta_ms").is_none());
-        assert_eq!(v["status"], "no_data");
+        assert!(v.get("rmssd_ms").is_none());
+        assert!(v.get("sdnn_ms").is_none());
+        assert_eq!(v["sample_count"], 0);
+        assert_eq!(v["status"], "low_signal");
     }
 
     #[test]
     fn hrv_result_round_trips_through_decode() {
         let m = ClientMessage::HrvResult {
             session_id: "sess-3".into(),
-            pre_ms: Some(40.0),
-            post_ms: Some(45.0),
-            delta_ms: Some(5.0),
-            sample_counts: HrvSampleCounts { pre: 2, post: 3 },
+            phase: "post".into(),
+            rmssd_ms: Some(45.0),
+            sdnn_ms: Some(40.0),
+            sample_count: 26,
+            snr_db: Some(9.4),
             status: "ok".into(),
         };
         let s = serde_json::to_string(&m).unwrap();

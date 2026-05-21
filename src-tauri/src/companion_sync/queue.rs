@@ -1,11 +1,11 @@
-//! `companion_queue.json` · queue of session windows that have not yet
-//! been delivered to every paired iPhone. Drained on peer auth, and after
-//! every fan-out attempt to remove windows that all paired phones have
+//! `companion_queue.json` · queue of measurement requests that have not
+//! yet been delivered to every paired iPhone. Drained on peer auth, and
+//! after every fan-out attempt to remove requests every paired phone has
 //! received.
 //!
 //! Spec contract: cap at 50 entries. When full, drop the oldest. The HRV
 //! feature is best-effort by design (privacy demands no cloud retention),
-//! so losing a one-month-old window is the right trade vs unbounded disk
+//! so losing a one-month-old request is the right trade vs unbounded disk
 //! growth.
 
 use std::collections::BTreeSet;
@@ -18,17 +18,19 @@ use crate::config;
 use super::protocol::ServerMessage;
 
 const FILENAME: &str = "companion_queue.json";
-const VERSION_CURRENT: u32 = 1;
+const VERSION_CURRENT: u32 = 2;
 const QUEUE_CAP: usize = 50;
 
+/// One pending `request_measurement` frame. Keyed by (session_id, phase)
+/// · the user can tap "Measure stress" for both phases of the same
+/// session, and each tap produces a separate queue entry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct QueuedWindow {
+pub struct QueuedRequest {
     pub session_id: String,
-    pub start: String,
-    pub end: String,
+    pub phase: String,
     pub technique_name: String,
     pub queued_at: String,
-    /// client_ids of paired phones that have received this window. When
+    /// client_ids of paired phones that have received this request. When
     /// this set covers every paired device, the entry can be pruned.
     pub sent_to: BTreeSet<String>,
 }
@@ -36,7 +38,7 @@ pub struct QueuedWindow {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Queue {
     pub version: u32,
-    pub entries: Vec<QueuedWindow>,
+    pub entries: Vec<QueuedRequest>,
 }
 
 impl Default for Queue {
@@ -59,7 +61,22 @@ pub fn load() -> Queue {
     let Ok(bytes) = std::fs::read(&path) else {
         return Queue::default();
     };
-    serde_json::from_slice::<Queue>(&bytes).unwrap_or_default()
+    parse(&bytes)
+}
+
+/// Pure parse for testability. v1 queue files (session windows from the
+/// removed HealthKit auto-read path) are dropped on load · the request
+/// shape changed and resurrecting old windows would produce useless
+/// frames for the new iOS code.
+fn parse(bytes: &[u8]) -> Queue {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+        return Queue::default();
+    };
+    let version = value.get("version").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+    if version != VERSION_CURRENT {
+        return Queue::default();
+    }
+    serde_json::from_value::<Queue>(value).unwrap_or_default()
 }
 
 pub fn save(q: &Queue) -> Result<(), String> {
@@ -71,25 +88,28 @@ pub fn save(q: &Queue) -> Result<(), String> {
     std::fs::write(&path, bytes).map_err(|e| e.to_string())
 }
 
-/// Append a fresh window to the queue. If the queue is at cap, drops the
+/// Append a fresh request to the queue. If the queue is at cap, drops the
 /// oldest entry first · this is the documented "lose history before losing
-/// the future" behaviour.
-pub fn enqueue(window: QueuedWindow) -> Result<(), String> {
+/// the future" behaviour. Idempotent on (session_id, phase).
+pub fn enqueue(req: QueuedRequest) -> Result<(), String> {
     let mut q = load();
-    if q.entries.iter().any(|e| e.session_id == window.session_id) {
+    if q.entries
+        .iter()
+        .any(|e| e.session_id == req.session_id && e.phase == req.phase)
+    {
         return Ok(());
     }
-    q.entries.push(window);
+    q.entries.push(req);
     while q.entries.len() > QUEUE_CAP {
         q.entries.remove(0);
     }
     save(&q)
 }
 
-/// Return every queued window the given phone has not yet received, in
+/// Return every queued request the given phone has not yet received, in
 /// queued-at order. Caller is expected to send each and then call
 /// `mark_sent_to` per success.
-pub fn pending_for(client_id: &str) -> Vec<QueuedWindow> {
+pub fn pending_for(client_id: &str) -> Vec<QueuedRequest> {
     load()
         .entries
         .into_iter()
@@ -97,29 +117,38 @@ pub fn pending_for(client_id: &str) -> Vec<QueuedWindow> {
         .collect()
 }
 
-/// Mark a window as delivered to a phone, and prune the entry entirely if
-/// every known paired device has now received it.
-pub fn mark_sent_to(session_id: &str, client_id: &str, all_paired_client_ids: &[String]) -> Result<(), String> {
+/// Mark a request as delivered to a phone, and prune the entry entirely
+/// if every known paired device has now received it.
+pub fn mark_sent_to(
+    session_id: &str,
+    phase: &str,
+    client_id: &str,
+    all_paired_client_ids: &[String],
+) -> Result<(), String> {
     let mut q = load();
-    if let Some(entry) = q.entries.iter_mut().find(|e| e.session_id == session_id) {
+    if let Some(entry) = q
+        .entries
+        .iter_mut()
+        .find(|e| e.session_id == session_id && e.phase == phase)
+    {
         entry.sent_to.insert(client_id.to_string());
         let fully_delivered = !all_paired_client_ids.is_empty()
             && all_paired_client_ids
                 .iter()
                 .all(|c| entry.sent_to.contains(c));
         if fully_delivered {
-            q.entries.retain(|e| e.session_id != session_id);
+            q.entries
+                .retain(|e| !(e.session_id == session_id && e.phase == phase));
         }
     }
     save(&q)
 }
 
 /// Convert a queued entry into the wire frame the phone receives.
-pub fn to_window_message(e: &QueuedWindow) -> ServerMessage {
-    ServerMessage::Window {
+pub fn to_request_message(e: &QueuedRequest) -> ServerMessage {
+    ServerMessage::RequestMeasurement {
         session_id: e.session_id.clone(),
-        start: e.start.clone(),
-        end: e.end.clone(),
+        phase: e.phase.clone(),
         technique_name: e.technique_name.clone(),
     }
 }
@@ -128,51 +157,70 @@ pub fn to_window_message(e: &QueuedWindow) -> ServerMessage {
 mod tests {
     use super::*;
 
-    fn sample(id: &str) -> QueuedWindow {
-        QueuedWindow {
+    fn sample(id: &str, phase: &str) -> QueuedRequest {
+        QueuedRequest {
             session_id: id.into(),
-            start: "2026-05-20T10:00:00Z".into(),
-            end: "2026-05-20T10:01:00Z".into(),
+            phase: phase.into(),
             technique_name: "Box Breathing".into(),
             queued_at: "2026-05-20T10:01:00Z".into(),
             sent_to: BTreeSet::new(),
         }
     }
 
-    /// Pure in-memory helpers, no disk · the file IO is covered by an
-    /// integration-style test that uses a temp dir below.
     #[test]
     fn duplicate_enqueue_is_idempotent_in_memory() {
         let mut q = Queue::default();
-        let w = sample("s-1");
+        let w = sample("s-1", "pre");
         q.entries.push(w.clone());
-        // Mirror what enqueue() would do · skip if session_id already present.
-        if !q.entries.iter().any(|e| e.session_id == w.session_id) {
+        if !q
+            .entries
+            .iter()
+            .any(|e| e.session_id == w.session_id && e.phase == w.phase)
+        {
             q.entries.push(w);
         }
         assert_eq!(q.entries.len(), 1);
     }
 
     #[test]
+    fn pre_and_post_for_same_session_are_distinct_entries() {
+        let mut q = Queue::default();
+        q.entries.push(sample("s-1", "pre"));
+        // Adding the post entry must not be deduped by session_id alone.
+        let post = sample("s-1", "post");
+        if !q
+            .entries
+            .iter()
+            .any(|e| e.session_id == post.session_id && e.phase == post.phase)
+        {
+            q.entries.push(post);
+        }
+        assert_eq!(q.entries.len(), 2);
+    }
+
+    #[test]
     fn cap_drops_oldest_first() {
         let mut q = Queue::default();
         for i in 0..QUEUE_CAP + 5 {
-            q.entries.push(sample(&format!("s-{i}")));
+            q.entries.push(sample(&format!("s-{i}"), "post"));
         }
         while q.entries.len() > QUEUE_CAP {
             q.entries.remove(0);
         }
         assert_eq!(q.entries.len(), QUEUE_CAP);
         assert_eq!(q.entries[0].session_id, "s-5");
-        assert_eq!(q.entries.last().unwrap().session_id, format!("s-{}", QUEUE_CAP + 4));
+        assert_eq!(
+            q.entries.last().unwrap().session_id,
+            format!("s-{}", QUEUE_CAP + 4)
+        );
     }
 
     #[test]
     fn pending_filter_skips_already_sent() {
         let mut q = Queue::default();
-        let mut a = sample("a");
+        let mut a = sample("a", "post");
         a.sent_to.insert("phone-1".into());
-        let b = sample("b");
+        let b = sample("b", "post");
         q.entries.push(a);
         q.entries.push(b);
 
@@ -186,9 +234,9 @@ mod tests {
     }
 
     #[test]
-    fn fully_delivered_window_is_pruned() {
+    fn fully_delivered_request_is_pruned() {
         let mut q = Queue::default();
-        let mut w = sample("w-1");
+        let mut w = sample("w-1", "post");
         w.sent_to.insert("phone-1".into());
         w.sent_to.insert("phone-2".into());
         q.entries.push(w);
@@ -206,21 +254,37 @@ mod tests {
     }
 
     #[test]
-    fn to_window_message_maps_fields() {
-        let w = sample("s-99");
-        match to_window_message(&w) {
-            ServerMessage::Window {
+    fn to_request_message_maps_fields() {
+        let w = sample("s-99", "pre");
+        match to_request_message(&w) {
+            ServerMessage::RequestMeasurement {
                 session_id,
-                start,
-                end,
+                phase,
                 technique_name,
             } => {
                 assert_eq!(session_id, "s-99");
-                assert_eq!(start, w.start);
-                assert_eq!(end, w.end);
+                assert_eq!(phase, "pre");
                 assert_eq!(technique_name, "Box Breathing");
             }
-            _ => panic!("expected Window"),
+            _ => panic!("expected RequestMeasurement"),
         }
+    }
+
+    #[test]
+    fn v1_queue_file_is_dropped() {
+        let v1 = br#"{
+            "version": 1,
+            "entries": [{
+                "session_id": "old-1",
+                "start": "2026-04-01T10:00:00Z",
+                "end": "2026-04-01T10:01:00Z",
+                "technique_name": "Box",
+                "queued_at": "2026-04-01T10:01:00Z",
+                "sent_to": []
+            }]
+        }"#;
+        let q = parse(v1);
+        assert!(q.entries.is_empty());
+        assert_eq!(q.version, VERSION_CURRENT);
     }
 }

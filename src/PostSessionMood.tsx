@@ -1,16 +1,22 @@
 import { useCallback, useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { scoreToBallGradient } from "./useSnapshot";
 
 interface Props {
   onDone: () => void;
+  /** Bound to the session that just finished, so a post-tap captures into
+   *  the same history row as any pre-session capture. */
+  sessionId: string;
 }
 
 const DOT_LABELS = ["Tense", "Heavy", "Neutral", "Settled", "Calm"];
 
 type Phase = "ask" | "thanks";
 
-export default function PostSessionMood({ onDone }: Props) {
+export default function PostSessionMood({ onDone, sessionId }: Props) {
   const [phase, setPhase] = useState<Phase>("ask");
+  const [companionPaired, setCompanionPaired] = useState(false);
+  const [postPulseSent, setPostPulseSent] = useState(false);
 
   // We deliberately do not store the user's answer. The dots exist as a
   // moment of self-reflection, nothing more. The closing screen is the
@@ -19,6 +25,29 @@ export default function PostSessionMood({ onDone }: Props) {
     if (phase !== "ask") return;
     setPhase("thanks");
   }, [phase]);
+
+  useEffect(() => {
+    interface MinStatus { paired_devices?: { client_id: string }[] }
+    invoke<MinStatus>("companion_status")
+      .then((s) => setCompanionPaired((s.paired_devices?.length ?? 0) > 0))
+      .catch(() => setCompanionPaired(false));
+  }, []);
+
+  const requestPostMeasurement = useCallback(() => {
+    if (postPulseSent) return;
+    setPostPulseSent(true);
+    invoke("companion_request_measurement", {
+      sessionId,
+      phase: "post",
+      // technique_name is informational on the phone (shown on the
+      // measurement sheet). The mood screen doesn't know it locally;
+      // sending an empty string is fine · the phone falls back to a
+      // generic label.
+      techniqueName: "",
+    }).catch(() => {
+      /* best-effort; phone may be offline */
+    });
+  }, [postPulseSent, sessionId]);
 
   useEffect(() => {
     if (phase !== "thanks") return;
@@ -65,6 +94,15 @@ export default function PostSessionMood({ onDone }: Props) {
                 </div>
               ))}
             </div>
+            {companionPaired && (
+              <button
+                className="mood-secondary"
+                onClick={requestPostMeasurement}
+                disabled={postPulseSent}
+              >
+                {postPulseSent ? "Sent to your iPhone" : "Measure stress"}
+              </button>
+            )}
             <button className="mood-skip" onClick={handleTap}>
               Skip
             </button>

@@ -6,13 +6,15 @@
 //! `protocol`, `keychain`, `state`, `queue`, `pairing`. See the doc
 //! comment at the top of `macos_impl.rs` for the design.
 
-/// The session window emitted to the iPhone when a breathing session ends.
-/// Cross-platform shape so call sites can construct it without `#[cfg]`.
+/// A request the Mac wants to send to the phone · "capture a 30s PPG
+/// reading for this side of this session." Cross-platform shape so call
+/// sites can construct it without `#[cfg]`. Built by the React layer
+/// when the user taps "Measure stress".
 #[derive(Clone, Debug)]
-pub struct SessionWindow {
+pub struct MeasurementRequest {
     pub session_id: String,
-    pub start: String,
-    pub end: String,
+    /// `"pre"` or `"post"`. Validated by the Mac before enqueue.
+    pub phase: String,
     pub technique_name: String,
 }
 
@@ -34,18 +36,18 @@ pub mod commands;
 #[cfg(target_os = "macos")]
 mod macos_impl;
 #[cfg(target_os = "macos")]
-pub use macos_impl::{start, CompanionStatus, CompanionSync};
+pub use macos_impl::start;
 
 #[cfg(not(target_os = "macos"))]
 mod stub {
-    use super::SessionWindow;
+    use super::MeasurementRequest;
     use tauri::AppHandle;
 
     #[derive(Clone, Default)]
     pub struct CompanionSync;
 
     impl CompanionSync {
-        pub fn enqueue_window(&self, _: SessionWindow) {}
+        pub fn enqueue_request(&self, _: MeasurementRequest) {}
     }
 
     pub fn start(_app: AppHandle) -> CompanionSync {

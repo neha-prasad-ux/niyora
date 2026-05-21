@@ -3,20 +3,25 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { calmScore, calmLabel } from "./calmScore";
 
-interface HrvReading {
-  received_at: string;
-  session_id: string;
-  pre_ms: number | null;
-  post_ms: number | null;
-  delta_ms: number | null;
-  samples_pre: number;
-  samples_post: number;
+interface PhaseCapture {
+  rmssd_ms: number | null;
+  sdnn_ms: number | null;
+  sample_count: number;
+  snr_db: number | null;
   status: string;
+  received_at: string;
 }
 
-/** Trend chart of calm scores derived from the iPhone's HRV readings.
+interface HrvReading {
+  session_id: string;
+  first_seen_at: string;
+  pre: PhaseCapture | null;
+  post: PhaseCapture | null;
+}
+
+/** Trend chart of calm scores derived from the iPhone's PPG captures.
  * Lives inside the Connect-your-iPhone card; renders only when there is
- * at least one ok-status reading on file. */
+ * at least one ok-status post reading on file. */
 export function CompanionHrvChart() {
   const [readings, setReadings] = useState<HrvReading[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -46,17 +51,31 @@ export function CompanionHrvChart() {
 
   if (!loaded) return null;
 
-  // Keep only readings with a usable post_ms · "no data" rows from the
-  // sparse-Watch path don't move the trend and shouldn't render as dots.
+  // Use post RMSSD as the headline metric; pre is only shown as a
+  // per-row delta. low_signal / cancelled rows do not move the trend.
   const points = readings
-    .filter((r) => r.status === "ok" && typeof r.post_ms === "number")
-    .map((r) => ({
-      at: Date.parse(r.received_at),
-      hrvMs: r.post_ms as number,
-      score: calmScore(r.post_ms) as number,
-      delta: r.delta_ms,
-    }))
-    .filter((p) => Number.isFinite(p.at))
+    .map((r) => {
+      const post = r.post;
+      if (!post || post.status !== "ok" || typeof post.rmssd_ms !== "number") {
+        return null;
+      }
+      const at = Date.parse(post.received_at);
+      if (!Number.isFinite(at)) return null;
+      const score = calmScore(post.rmssd_ms);
+      if (score === null) return null;
+      const pre = r.pre;
+      const delta =
+        pre && pre.status === "ok" && typeof pre.rmssd_ms === "number"
+          ? post.rmssd_ms - pre.rmssd_ms
+          : null;
+      return {
+        at,
+        hrvMs: post.rmssd_ms,
+        score,
+        delta,
+      };
+    })
+    .filter((p): p is { at: number; hrvMs: number; score: number; delta: number | null } => p !== null)
     .sort((a, b) => a.at - b.at);
 
   if (points.length === 0) return null;
