@@ -1107,6 +1107,56 @@ html, body, #root {
   margin-top: 8px;
 }
 
+.companion-hrv-trend {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.companion-hrv-headline {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.companion-hrv-score {
+  font-size: 28px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.95);
+  line-height: 1;
+}
+.companion-hrv-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.companion-hrv-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.82);
+  text-transform: capitalize;
+}
+.companion-hrv-sub {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.45);
+  font-variant-numeric: tabular-nums;
+}
+.companion-hrv-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.companion-hrv-footer {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.4);
+  text-align: center;
+  font-style: italic;
+}
+
 .companion-modal-backdrop {
   position: fixed;
   inset: 0;

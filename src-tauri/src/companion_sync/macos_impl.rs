@@ -32,11 +32,12 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, Mutex};
 
+use super::history::HrvReading;
 use super::pairing::PairingManager;
 use super::protocol::{ClientMessage, QrPayload, ServerMessage, PROTOCOL_VERSION};
 use super::queue::QueuedWindow;
 use super::state::PairedDevice;
-use super::{keychain, queue, state, SessionWindow};
+use super::{history, keychain, queue, state, SessionWindow};
 
 const SERVICE_TYPE: &str = "_niyora._tcp.local.";
 const INSTANCE_NAME: &str = "Niyora";
@@ -422,9 +423,20 @@ impl CompanionSync {
                                          samples={}/{} status={status}",
                                         sample_counts.pre, sample_counts.post
                                     );
-                                    // Storage + My Soul surfacing land in
-                                    // the next PR; for now we acknowledge
-                                    // the message exists in the protocol.
+                                    let reading = HrvReading {
+                                        received_at: now_rfc3339(),
+                                        session_id,
+                                        pre_ms,
+                                        post_ms,
+                                        delta_ms,
+                                        samples_pre: sample_counts.pre,
+                                        samples_post: sample_counts.post,
+                                        status,
+                                    };
+                                    if let Err(e) = history::record(reading) {
+                                        eprintln!("[companion_sync] history record failed: {e}");
+                                    }
+                                    self.emit_state().await;
                                 }
                                 Ok(other) => {
                                     eprintln!("[companion_sync] unexpected post-auth frame: {other:?}");
