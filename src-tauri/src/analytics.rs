@@ -27,6 +27,7 @@ pub fn append_event(event_type: &str, meta: Value) -> Result<(), String> {
         .open(&path)
         .map_err(|e| e.to_string())?;
     writeln!(f, "{line}").map_err(|e| e.to_string())?;
+    crate::telemetry::capture(event_type, &meta);
     Ok(())
 }
 

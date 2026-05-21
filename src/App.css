@@ -955,6 +955,60 @@ html, body, #root {
 
 /* CTA cards (PSS-4, founder, app store) */
 .soul-card-cta { gap: 8px; }
+
+/* Toggle card: label on the left, iOS-style switch on the right. */
+.soul-card-toggle { gap: 8px; }
+.soul-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.soul-toggle-text { flex: 1; min-width: 0; }
+.soul-switch {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+  width: 38px;
+  height: 22px;
+  cursor: pointer;
+}
+.soul-switch input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  margin: 0;
+}
+.soul-switch-track {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+.soul-switch-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  transition: transform 0.2s ease;
+}
+.soul-switch input:checked + .soul-switch-track {
+  background: hsla(265, 60%, 55%, 0.7);
+  border-color: hsla(265, 60%, 70%, 0.5);
+}
+.soul-switch input:checked + .soul-switch-track::after {
+  transform: translateX(16px);
+}
+.soul-switch input:focus-visible + .soul-switch-track {
+  outline: 2px solid hsla(265, 70%, 70%, 0.6);
+  outline-offset: 2px;
+}
 .soul-cta-title {
   font-size: 14px;
   font-weight: 500;
@@ -1131,6 +1185,13 @@ html, body, #root {
   user-select: none;
   max-width: 340px;
   margin: 0 auto;
+}
+
+.soul-version {
+  display: block;
+  margin-top: 6px;
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.4);
 }
 
 /* ============================================================ */
@@ -1454,6 +1515,59 @@ html, body, #root {
   opacity: 0.4;
   cursor: default;
   box-shadow: 0 4px 14px hsla(270, 50%, 40%, 0.2);
+}
+
+/* Analytics consent detail panel. */
+.onboarding-note {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 11.5px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.62);
+  text-align: left;
+  white-space: pre-line;
+}
+.onboarding-note-head {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+  margin-bottom: 6px;
+}
+
+/* Lock icon on the consent slide replaces the Niyora logo for visual signal. */
+.onboarding-lock-icon {
+  color: rgba(255, 255, 255, 0.92);
+  margin-bottom: 18px;
+  filter: drop-shadow(0 0 12px hsla(265, 50%, 65%, 0.25));
+}
+
+/* Consent slide: stacked primary + secondary buttons. */
+.onboarding-consent-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.onboarding-consent-actions .onboarding-btn {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 24px;
+}
+.onboarding-consent-actions .onboarding-btn:first-child {
+  margin-top: 20px;
+}
+.onboarding-btn-secondary {
+  margin-top: 0;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: none;
+}
+.onboarding-btn-secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: none;
 }
 
 /* "I live up here" pointer on the first onboarding slide.

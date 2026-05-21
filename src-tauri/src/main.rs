@@ -8,6 +8,7 @@ mod onboarding;
 mod reminder;
 mod sessions;
 mod situational;
+mod telemetry;
 #[cfg(target_os = "macos")]
 mod tray_mac;
 mod updater;
@@ -262,6 +263,8 @@ fn main() {
             onboarding::is_onboarded,
             onboarding::mark_onboarded,
             onboarding::request_notification_permission,
+            telemetry::analytics_consent_status,
+            telemetry::set_analytics_consent,
             #[cfg(target_os = "macos")]
             companion_sync::commands::companion_status,
             #[cfg(target_os = "macos")]
@@ -328,6 +331,9 @@ fn main() {
             // (sessions.rs) stay clean.
             let companion = companion_sync::start(app.handle().clone());
             app.manage(companion);
+
+            // Anonymous launch event. Stays local unless the user opted in.
+            let _ = analytics::append_event("app_launched", serde_json::json!({}));
 
             // Hide from dock — menu bar only
             #[cfg(target_os = "macos")]

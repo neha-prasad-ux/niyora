@@ -1,9 +1,11 @@
 // Auto-update flow for Niyora.
 //
-// Privacy contract (see /privacy/ on the marketing site): the only outbound
-// network request the app ever makes is this update check, hitting the
-// endpoint configured in tauri.conf.json (downloads.niyora.com/latest.json).
-// No telemetry or analytics is attached to the request.
+// Privacy contract (see /privacy/ on the marketing site): the app makes only
+// two kinds of outbound request, and nothing else.
+//  1. This update check, hitting the endpoint configured in tauri.conf.json
+//     (downloads.niyora.com/latest.json). No telemetry is attached to it.
+//  2. Anonymous analytics events, but only if the user opted in on the
+//     onboarding consent slide. See telemetry.rs for exactly what is sent.
 //
 // Behavior:
 // - On launch, `check(app, false)` is called once. If a new version is found,

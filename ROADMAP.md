@@ -23,7 +23,7 @@ Living doc. User feedback queued for triage. Score impact (1 low, 5 high) and ef
 | 12 | Opt-in research partnerships | 5 | 5 | Recruit consistent users into IRB-friendly studies. Long horizon. Needs ethics/legal review before any pitch. |
 | 13 | Pledge prompt | 3 | 1 | Onboarding ask: "I'll breathe with Niyora for 7 days." Soft commitment. One screen in `Onboarding.tsx`. |
 | 14 | Smarter reminder timing | 5 | 4 | Surface reminders when situational signals say the user is overworked (longer-than-usual focus block, late hour, etc.). Builds on existing collectors. |
-| 15 | Opt-in telemetry | 4 | 3 | Local-first; user explicitly enables. Anonymous, aggregate only. Must pass the "does this leak anything?" sniff test. |
+| 15 | Opt-in telemetry | 4 | 3 | Shipped. Consent slide added to onboarding; choice persisted; `telemetry.rs` forwards an allow-listed set of anonymous events to PostHog EU. Per-event meta allow-list: `session_recorded` carries technique name/kind/completed; `reminder_fired` drops `score`/`label`; pss4 data never sent. Crash reporting parked for a proper Sentry integration. Marketing-site `/privacy/` page must be updated in niyora-web before release. |
 | 16 | HRV integration to measure impact | 4 | 5 | HealthKit is iOS-only, so this needs a companion iPhone app syncing to the Mac over local network. Parallel track, doesn't block macOS polish. Spec: `docs/hrv-companion-spec.md`. |
 | 17 | Marketing roadmap | 5 | 3 | Separate doc: positioning, channels, launch beats. Tie to research credibility (#11, #12) and measurable impact (#16). |
 | 18 | App disappears from tray after Mac restart | User report | 5 | 1 | App doesn't relaunch at login, so the tray icon is gone until the user opens Niyora manually. Register as a macOS Login Item (Tauri autostart plugin or `SMAppService`). Default on; expose toggle in onboarding/Settings. Critical for retention. A reminder app that doesn't survive a reboot is invisible. |
@@ -39,9 +39,11 @@ Living doc. User feedback queued for triage. Score impact (1 low, 5 high) and ef
 ## Shipped
 
 - **Windows / PC build** (was #1). Shipped with Windows cert, signing pipeline, and CI.
+- **App version shown in-app.** "Version X" line in the My Soul footer, sourced from `getVersion()` so it always matches `tauri.conf.json`.
 
 ## Later / parked
 
 (Move items here once decided against for now, with a one-line reason.)
 
 - **Tray-icon pulse animation** (was #7). Replaced by the 6-second spinning electron shipped in #14. Pulse pattern dropped in favour of a one-shot attention sweep on first launch.
+- **Crash / error reporting.** Deferred to a proper Sentry integration (Tauri SDK, catches native + Rust crashes with symbolication). Not bundled with #15; a Rust-only panic hook was rejected as too partial. Until this lands, consent copy must not claim crash reports are collected.

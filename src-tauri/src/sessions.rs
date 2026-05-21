@@ -95,6 +95,18 @@ pub fn record_session(
         completed,
     )?;
 
+    // Anonymous opt-in telemetry. No-op unless the user opted in on the
+    // onboarding consent slide. Only the keys listed in `telemetry::forwarded_meta`
+    // are forwarded to PostHog.
+    crate::telemetry::capture(
+        "session_recorded",
+        &serde_json::json!({
+            "technique_name": technique_name,
+            "technique_kind": technique_kind,
+            "completed": completed,
+        }),
+    );
+
     // Emit to the HRV companion only for completed sessions. Abandoned
     // sessions are not interesting for HRV impact measurement because the
     // user did not finish the practice. If `started_at` is malformed we

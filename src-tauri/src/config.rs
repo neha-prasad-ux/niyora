@@ -31,6 +31,14 @@ pub struct NiyoraConfig {
     /// stored secret keeps mapping to the same server across reboots.
     #[serde(default)]
     pub companion_server_id: Option<String>,
+    /// Anonymous analytics consent. `None` = not asked yet, `Some(true)` =
+    /// opted in, `Some(false)` = declined. Set on the onboarding consent slide.
+    #[serde(default)]
+    pub analytics_consent: Option<bool>,
+    /// Random anonymous identifier for PostHog. Generated once, only when the
+    /// user opts in. Never tied to any personal information.
+    #[serde(default)]
+    pub analytics_id: Option<String>,
 }
 
 pub fn config_path() -> Option<PathBuf> {

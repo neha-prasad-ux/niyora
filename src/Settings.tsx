@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useSnapshot, scoreToBallGradient } from "./useSnapshot";
 import { useSessionStats } from "./useSessionStats";
@@ -103,6 +104,29 @@ export default function Settings({ onBack, onOpenPss4 }: Props) {
     import.meta.env.DEV ? readForcedSessions() : null
   );
   const completed = forcedSessions ?? liveStats.completed;
+
+  const [version, setVersion] = useState("");
+  useEffect(() => {
+    getVersion().then(setVersion).catch(() => {
+      /* leave empty if the API is unavailable in dev preview */
+    });
+  }, []);
+
+  // Analytics consent: `null` while loading or if the backend is unavailable,
+  // then `true` / `false` per the onboarding choice. Saved immediately on toggle.
+  const [analyticsOn, setAnalyticsOn] = useState<boolean | null>(null);
+  useEffect(() => {
+    invoke<boolean | null>("analytics_consent_status")
+      .then((v) => setAnalyticsOn(v))
+      .catch(() => setAnalyticsOn(null));
+  }, []);
+  const toggleAnalytics = (next: boolean) => {
+    setAnalyticsOn(next);
+    invoke("set_analytics_consent", { granted: next }).catch(() => {
+      /* revert on failure so UI matches backend state */
+      setAnalyticsOn(!next);
+    });
+  };
 
   const [pss4History, setPss4History] = useState<Pss4Entry[]>([]);
   useEffect(() => {
@@ -245,6 +269,25 @@ export default function Settings({ onBack, onOpenPss4 }: Props) {
 
         <CompanionCard />
 
+        <div className="soul-card soul-card-toggle">
+          <div className="soul-toggle-row">
+            <div className="soul-toggle-text">
+              <div className="soul-cta-title">Anonymous analytics</div>
+              <div className="soul-cta-blurb">
+                Helps shape what to improve next. Stress scores, breath patterns, and anything that identifies you stay on your Mac.
+              </div>
+            </div>
+            <label className="soul-switch" aria-label="Toggle anonymous analytics">
+              <input
+                type="checkbox"
+                checked={analyticsOn === true}
+                onChange={(e) => toggleAnalytics(e.target.checked)}
+              />
+              <span className="soul-switch-track" />
+            </label>
+          </div>
+        </div>
+
         <div className="soul-card soul-card-cta">
           <div className="soul-cta-title">Message the founder</div>
           <div className="soul-cta-blurb">
@@ -263,7 +306,8 @@ export default function Settings({ onBack, onOpenPss4 }: Props) {
         </div>
 
         <div className="soul-footer">
-          Niyora runs entirely on your Mac. No accounts, no tracking, no data sent anywhere. Breathe easy.
+          Niyora runs entirely on your Mac. No accounts, no profiles. Analytics are anonymous, optional, and only sent if you choose. Breathe easy.
+          {version && <span className="soul-version">Version {version}</span>}
         </div>
 
         {import.meta.env.DEV && (
