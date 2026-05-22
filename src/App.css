@@ -339,6 +339,126 @@ html, body, #root {
 }
 
 /* ============================================================ */
+/* Measure-stress card · state machine, used on info + mood       */
+/* ============================================================ */
+.measure-card {
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  gap: 14px;
+  align-items: center;
+  width: 280px;
+  padding: 14px 18px;
+  margin-top: 18px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-family: 'Poppins', sans-serif;
+}
+.measure-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.35);
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.15);
+  align-self: center;
+  justify-self: center;
+}
+.measure-card-not_paired .measure-dot {
+  background: rgba(255, 255, 255, 0.25);
+  box-shadow: none;
+}
+.measure-card-ready .measure-dot {
+  background: hsla(280, 70%, 65%, 0.85);
+  box-shadow: 0 0 8px hsla(280, 65%, 55%, 0.5);
+  animation: measureDotPulse 3.4s ease-in-out infinite;
+}
+.measure-card-measuring .measure-dot {
+  background: hsla(280, 80%, 70%, 1);
+  box-shadow: 0 0 12px hsla(280, 75%, 60%, 0.7);
+  animation: measureDotPulseFast 1.4s ease-in-out infinite;
+}
+.measure-card-result_ok .measure-dot {
+  background: hsla(140, 60%, 65%, 0.9);
+  box-shadow: 0 0 10px hsla(140, 55%, 50%, 0.55);
+}
+.measure-card-result_low_signal .measure-dot {
+  background: hsla(30, 75%, 65%, 0.9);
+  box-shadow: 0 0 10px hsla(30, 70%, 50%, 0.5);
+}
+@keyframes measureDotPulse {
+  0%, 100% { opacity: 0.85; }
+  50%      { opacity: 0.45; }
+}
+@keyframes measureDotPulseFast {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50%      { transform: scale(1.4); opacity: 0.6; }
+}
+.measure-body { min-width: 0; }
+.measure-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.92);
+  letter-spacing: 0.2px;
+}
+.measure-card-result_ok .measure-title {
+  color: hsla(140, 60%, 80%, 0.95);
+}
+.measure-sub {
+  font-size: 11px;
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.55);
+  line-height: 1.4;
+  margin-top: 3px;
+}
+.measure-cta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+.measure-btn {
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  padding: 7px 14px;
+  border-radius: 16px;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.measure-btn:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.35);
+  color: rgba(255, 255, 255, 0.95);
+}
+.measure-btn:disabled { opacity: 0.4; cursor: default; }
+.measure-btn-primary {
+  background: hsla(280, 55%, 40%, 0.32);
+  border-color: hsla(280, 65%, 65%, 0.32);
+  color: rgba(255, 255, 255, 0.94);
+}
+.measure-btn-primary:hover:not(:disabled) {
+  background: hsla(280, 60%, 45%, 0.48);
+  border-color: hsla(280, 70%, 70%, 0.45);
+}
+.measure-progress {
+  width: 84px;
+  height: 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.measure-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg,
+    hsla(280, 65%, 55%, 0.85),
+    hsla(280, 75%, 70%, 0.95));
+  transition: width 0.25s linear;
+}
+
+/* ============================================================ */
 /* Post-session reveal · shown when both pre + post PPG landed   */
 /* ============================================================ */
 .niyora-reveal {

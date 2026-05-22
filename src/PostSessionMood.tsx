@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { scoreToBallGradient } from "./useSnapshot";
 import PostSessionReveal from "./PostSessionReveal";
+import MeasureStressCard from "./MeasureStressCard";
 
 interface Props {
   onDone: () => void;
@@ -29,9 +30,11 @@ type Phase = "ask" | "thanks" | "reveal";
 
 export default function PostSessionMood({ onDone, sessionId, onSeeSoul }: Props) {
   const [phase, setPhase] = useState<Phase>("ask");
-  const [companionPaired, setCompanionPaired] = useState(false);
-  const [postPulseSent, setPostPulseSent] = useState(false);
   const [hasBothCaptures, setHasBothCaptures] = useState(false);
+  // Tracks whether the user has tapped the measure CTA in this view ·
+  // gates the auto-dismiss timer so the reveal can take over once the
+  // result lands.
+  const [postPulseSent, setPostPulseSent] = useState(false);
 
   // We deliberately do not store the user's answer. The dots exist as a
   // moment of self-reflection, nothing more. The closing screen is the
@@ -40,13 +43,6 @@ export default function PostSessionMood({ onDone, sessionId, onSeeSoul }: Props)
     if (phase !== "ask") return;
     setPhase("thanks");
   }, [phase]);
-
-  useEffect(() => {
-    interface MinStatus { paired_devices?: { client_id: string }[] }
-    invoke<MinStatus>("companion_status")
-      .then((s) => setCompanionPaired((s.paired_devices?.length ?? 0) > 0))
-      .catch(() => setCompanionPaired(false));
-  }, []);
 
   // Subscribe to companion history updates. When both pre and post land
   // for this session, swap from the mood-dots view to the reveal view ·
@@ -78,22 +74,6 @@ export default function PostSessionMood({ onDone, sessionId, onSeeSoul }: Props)
       unlisten.then((u) => u()).catch(() => {});
     };
   }, [sessionId]);
-
-  const requestPostMeasurement = useCallback(() => {
-    if (postPulseSent) return;
-    setPostPulseSent(true);
-    invoke("companion_request_measurement", {
-      sessionId,
-      phase: "post",
-      // technique_name is informational on the phone (shown on the
-      // measurement sheet). The mood screen doesn't know it locally;
-      // sending an empty string is fine · the phone falls back to a
-      // generic label.
-      techniqueName: "",
-    }).catch(() => {
-      /* best-effort; phone may be offline */
-    });
-  }, [postPulseSent, sessionId]);
 
   useEffect(() => {
     if (phase !== "thanks") return;
@@ -159,15 +139,12 @@ export default function PostSessionMood({ onDone, sessionId, onSeeSoul }: Props)
                 </div>
               ))}
             </div>
-            {companionPaired && (
-              <button
-                className="mood-secondary"
-                onClick={requestPostMeasurement}
-                disabled={postPulseSent}
-              >
-                {postPulseSent ? "Sent to your iPhone" : "Measure stress"}
-              </button>
-            )}
+            <MeasureStressCard
+              sessionId={sessionId}
+              phase="post"
+              techniqueName=""
+              onMeasureStarted={() => setPostPulseSent(true)}
+            />
             <button className="mood-skip" onClick={handleTap}>
               Skip
             </button>
