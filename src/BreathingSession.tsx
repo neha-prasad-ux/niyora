@@ -18,10 +18,11 @@ function intendedDurationSec(t: Technique): number {
   return t.prompts.reduce((sum, p) => sum + p.duration, 0);
 }
 import { scoreToBallGradient, scoreToOrbAccent, type SituationalSnapshot } from "./useSnapshot";
+import MeasureStressCard from "./MeasureStressCard";
 
 // --- Config ---
-const LG_WIDTH = 420;
-const LG_HEIGHT = 520;
+const LG_WIDTH = 460;
+const LG_HEIGHT = 640;
 // Used by motion functions outside the component
 let WIDTH = LG_WIDTH;
 let HEIGHT = LG_HEIGHT;
@@ -477,13 +478,9 @@ export default function BreathingSession({ sessionId, onComplete, snapshot, comp
   // Once the user picks a technique from "Try a different one", drop the
   // day-start framing and show the real technique name/subtitle.
   const [showDayStart, setShowDayStart] = useState(!!isFirstOpenToday);
-  // Companion state · the "Measure stress" button only renders when
-  // there is at least one paired iPhone (otherwise the button would do
-  // nothing and confuse users who never paired). Polled lazily on mount
-  // because companion_status is a cheap local call. `prePulseSent`
-  // suppresses repeat taps in the same info screen.
-  const [companionPaired, setCompanionPaired] = useState(false);
-  const [prePulseSent, setPrePulseSent] = useState(false);
+  // Companion state-machine card replaces the earlier secondary button.
+  // The card handles its own paired/measuring/result lifecycle so this
+  // view doesn't need to track those individual flags anymore.
 
   // Compute which techniques are locked at the user's current tier.
   const userTier = currentTier(completedSessions ?? 0);
@@ -545,26 +542,6 @@ export default function BreathingSession({ sessionId, onComplete, snapshot, comp
       /* best-effort; never block UX on storage */
     });
   }, [sessionId]);
-
-  useEffect(() => {
-    interface MinStatus { paired_devices?: { client_id: string }[] }
-    invoke<MinStatus>("companion_status")
-      .then((s) => setCompanionPaired((s.paired_devices?.length ?? 0) > 0))
-      .catch(() => setCompanionPaired(false));
-  }, []);
-
-  const requestPreMeasurement = useCallback(() => {
-    if (prePulseSent) return;
-    setPrePulseSent(true);
-    invoke("companion_request_measurement", {
-      sessionId,
-      phase: "pre",
-      techniqueName: stateRef.current.technique.name,
-    }).catch(() => {
-      // Best-effort · if the phone is unreachable the request sits in
-      // the queue and drains on next connect. No surfaced error.
-    });
-  }, [prePulseSent, sessionId]);
 
   const handleBegin = useCallback(() => {
     btnParticles.stopEmitting();
@@ -1391,15 +1368,13 @@ export default function BreathingSession({ sessionId, onComplete, snapshot, comp
             >
               Try a different one
             </button>
-            {companionPaired && (
-              <button
-                className="info-fade-4 info-secondary-btn"
-                onClick={requestPreMeasurement}
-                disabled={transitioning || prePulseSent}
-              >
-                {prePulseSent ? "Sent to your iPhone" : "Measure stress"}
-              </button>
-            )}
+            <div className="info-fade-4" style={{ display: "flex", justifyContent: "center" }}>
+              <MeasureStressCard
+                sessionId={sessionId}
+                phase="pre"
+                techniqueName={stateRef.current.technique.name}
+              />
+            </div>
           </div>
         </div>
       )}

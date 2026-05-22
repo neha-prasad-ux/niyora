@@ -277,6 +277,8 @@ fn main() {
             companion_sync::commands::companion_hrv_history,
             #[cfg(target_os = "macos")]
             companion_sync::commands::companion_request_measurement,
+            #[cfg(all(target_os = "macos", debug_assertions))]
+            companion_sync::commands::companion_inject_synthetic_reveal,
         ])
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_opener::init())
@@ -735,7 +737,7 @@ fn toggle_panel(app_handle: &tauri::AppHandle) {
         if let Ok(Some(monitor)) = window.current_monitor() {
             let screen = monitor.size();
             let scale = monitor.scale_factor();
-            let panel_w_logical: f64 = 420.0;
+            let panel_w_logical: f64 = 460.0;
             let panel_w_phys = panel_w_logical * scale;
             let screen_w = screen.width as f64;
             let edge_margin = 8.0 * scale;
@@ -827,8 +829,8 @@ fn toggle_panel(app_handle: &tauri::AppHandle) {
             .try_state::<TrayRect>()
             .and_then(|s| *s.0.lock().unwrap());
 
-        let panel_w_logical: f64 = 420.0;
-        let panel_h_logical: f64 = 520.0;
+        let panel_w_logical: f64 = 460.0;
+        let panel_h_logical: f64 = 640.0;
         let panel_w_phys = panel_w_logical * scale;
         let panel_h_phys = panel_h_logical * scale;
         let screen_w = screen.width as f64;
