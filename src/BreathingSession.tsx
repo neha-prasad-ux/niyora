@@ -21,8 +21,8 @@ import { scoreToBallGradient, scoreToOrbAccent, type SituationalSnapshot } from 
 import MeasureStressCard from "./MeasureStressCard";
 
 // --- Config ---
-const LG_WIDTH = 420;
-const LG_HEIGHT = 520;
+const LG_WIDTH = 460;
+const LG_HEIGHT = 640;
 // Used by motion functions outside the component
 let WIDTH = LG_WIDTH;
 let HEIGHT = LG_HEIGHT;

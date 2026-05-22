@@ -343,23 +343,23 @@ html, body, #root {
 /* ============================================================ */
 .measure-card {
   display: grid;
-  grid-template-columns: 16px 1fr auto;
-  gap: 16px;
+  grid-template-columns: 18px 1fr auto;
+  gap: 18px;
   align-items: center;
-  width: 348px;
-  padding: 18px 22px;
-  margin-top: 22px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  width: 388px;
+  padding: 22px 26px;
+  margin-top: 34px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   font-family: 'Poppins', sans-serif;
 }
 .measure-dot {
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.35);
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.4);
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.2);
   align-self: center;
   justify-self: center;
 }
@@ -395,20 +395,20 @@ html, body, #root {
 }
 .measure-body { min-width: 0; }
 .measure-title {
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.94);
+  color: rgba(255, 255, 255, 0.95);
   letter-spacing: 0.2px;
 }
 .measure-card-result_ok .measure-title {
   color: hsla(140, 60%, 80%, 0.95);
 }
 .measure-sub {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 300;
-  color: rgba(255, 255, 255, 0.58);
-  line-height: 1.45;
-  margin-top: 5px;
+  color: rgba(255, 255, 255, 0.62);
+  line-height: 1.5;
+  margin-top: 7px;
 }
 .measure-cta {
   display: flex;
@@ -416,16 +416,16 @@ html, body, #root {
   justify-content: flex-end;
 }
 .measure-btn {
-  color: rgba(255, 255, 255, 0.82);
-  font-size: 11px;
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 12px;
   letter-spacing: 1.5px;
   text-transform: uppercase;
-  padding: 9px 18px;
-  border-radius: 18px;
+  padding: 11px 22px;
+  border-radius: 20px;
   background: transparent;
   font-family: inherit;
   cursor: pointer;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.22);
   transition: all 0.15s ease;
   white-space: nowrap;
 }
