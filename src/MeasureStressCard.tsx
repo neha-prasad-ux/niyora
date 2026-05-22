@@ -49,11 +49,15 @@ interface Props {
 type State =
   | { kind: "not_paired" }
   | { kind: "ready"; lastDeltaPct: number | null }
-  | { kind: "measuring"; startedAt: number }
+  | { kind: "waiting_on_phone"; startedAt: number }
   | { kind: "result_ok"; deltaPct: number }
-  | { kind: "result_low_signal" };
+  | { kind: "result_problem"; reason: "low_signal" | "finger_lifted" | "cancelled" };
 
-const MEASURE_DURATION_MS = 30_000;
+/** How long to keep the card in "waiting_on_phone" before assuming the
+ *  request didn't reach the iPhone. Generous: the phone may take a few
+ *  seconds to wake, plus the 30s capture, plus settle. After this we
+ *  let the user try again. */
+const WAITING_TIMEOUT_MS = 60_000;
 
 /**
  * State-machine card for the "Measure stress" flow. Detects whether an
@@ -151,7 +155,14 @@ export default function MeasureStressCard({
     if (paired === false) return { kind: "not_paired" };
 
     const currentCapture = currentRow ? currentRow[phase] : null;
-    if (currentCapture) {
+    // If a result has landed for this phase since we sent our request,
+    // honor it · ignore older captures (e.g. a stale finger_lifted from
+    // a previous attempt this same session) so a fresh tap can succeed.
+    const captureIsFresh =
+      currentCapture !== null && currentCapture !== undefined &&
+      (measureStartedAt === null ||
+        Date.parse(currentCapture.received_at) >= measureStartedAt);
+    if (captureIsFresh && currentCapture) {
       if (currentCapture.status === "ok" && currentRow?.pre && currentRow?.post) {
         const pre = calmScore(currentRow.pre.rmssd_ms);
         const post = calmScore(currentRow.post.rmssd_ms);
@@ -160,14 +171,20 @@ export default function MeasureStressCard({
         }
       }
       if (currentCapture.status === "low_signal") {
-        return { kind: "result_low_signal" };
+        return { kind: "result_problem", reason: "low_signal" };
+      }
+      if (currentCapture.status === "finger_lifted") {
+        return { kind: "result_problem", reason: "finger_lifted" };
+      }
+      if (currentCapture.status === "cancelled") {
+        return { kind: "result_problem", reason: "cancelled" };
       }
     }
 
     if (measureStartedAt !== null) {
       const elapsed = Date.now() - measureStartedAt;
-      if (elapsed < MEASURE_DURATION_MS + 5_000) {
-        return { kind: "measuring", startedAt: measureStartedAt };
+      if (elapsed < WAITING_TIMEOUT_MS) {
+        return { kind: "waiting_on_phone", startedAt: measureStartedAt };
       }
     }
 
@@ -183,7 +200,7 @@ export default function MeasureStressCard({
   }, [paired, currentRow, phase, measureStartedAt, latestPriorOk]);
 
   const startMeasurement = useCallback(() => {
-    if (state.kind === "measuring") return;
+    if (state.kind === "waiting_on_phone") return;
     setMeasureStartedAt(Date.now());
     onMeasureStarted?.();
     invoke("companion_request_measurement", {
@@ -192,7 +209,7 @@ export default function MeasureStressCard({
       techniqueName,
     }).catch(() => {
       /* best-effort · phone may be offline. The state machine will
-         time out the measuring state and revert to ready. */
+         time out the waiting state and revert to ready. */
     });
   }, [state.kind, sessionId, phase, techniqueName, onMeasureStarted]);
 
@@ -238,23 +255,16 @@ function renderBody(state: State, phase: Phase) {
           </div>
         </>
       );
-    case "measuring": {
-      const elapsedMs = Math.max(0, Date.now() - state.startedAt);
-      const remaining = Math.max(0, MEASURE_DURATION_MS - elapsedMs);
-      const remainingSec = Math.ceil(remaining / 1000);
-      const stage =
-        elapsedMs < 4_000
-          ? "Open Niyora on your iPhone."
-          : elapsedMs < 8_000
-            ? "Place your fingertip over the back camera and flashlight."
-            : `Measuring. ${remainingSec}s left.`;
+    case "waiting_on_phone":
       return (
         <>
-          <div className="measure-title">Hold still</div>
-          <div className="measure-sub">{stage}</div>
+          <div className="measure-title">Waiting on your iPhone</div>
+          <div className="measure-sub">
+            Open Niyora on your phone and hold your fingertip over the
+            back camera and flashlight.
+          </div>
         </>
       );
-    }
     case "result_ok":
       return (
         <>
@@ -270,12 +280,20 @@ function renderBody(state: State, phase: Phase) {
           </div>
         </>
       );
-    case "result_low_signal":
+    case "result_problem":
       return (
         <>
-          <div className="measure-title">Reading was too noisy</div>
+          <div className="measure-title">
+            {state.reason === "low_signal" && "Reading was too noisy"}
+            {state.reason === "finger_lifted" && "Finger came off the lens"}
+            {state.reason === "cancelled" && "Measurement cancelled"}
+          </div>
           <div className="measure-sub">
-            Press your fingertip more firmly over the lens and try again.
+            {state.reason === "low_signal" &&
+              "Press your fingertip more firmly over the lens and try again."}
+            {state.reason === "finger_lifted" &&
+              "Keep your fingertip still on the back camera for the whole 30 seconds and try again."}
+            {state.reason === "cancelled" && "You can try again anytime."}
           </div>
         </>
       );
@@ -310,24 +328,17 @@ function renderCta(
           Measure
         </button>
       );
-    case "measuring": {
-      const elapsedMs = Math.max(0, Date.now() - state.startedAt);
-      const progress = Math.min(1, elapsedMs / MEASURE_DURATION_MS);
+    case "waiting_on_phone":
       return (
         <div
-          className="measure-progress"
-          aria-label={`Measuring, ${Math.round(progress * 100)} percent done`}
-        >
-          <div
-            className="measure-progress-fill"
-            style={{ width: `${progress * 100}%` }}
-          />
-        </div>
+          className="measure-spinner"
+          aria-label="Waiting on your iPhone"
+        />
       );
-    }
     case "result_ok":
       return null;
-    case "result_low_signal":
+    case "result_problem":
+      if (state.reason === "cancelled") return null;
       return (
         <button
           type="button"
