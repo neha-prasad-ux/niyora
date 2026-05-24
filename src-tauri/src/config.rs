@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+fn default_true() -> bool { true }
+
 /// Application data directory: `~/Library/Application Support/com.niyora.breathing/`
 /// on macOS. Used for config, analytics events, and session history.
 /// Created on first access.
@@ -11,7 +13,7 @@ pub fn app_data_dir() -> Option<PathBuf> {
     Some(dir)
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct NiyoraConfig {
     /// Date (YYYY-MM-DD, local) of last PSS-4 prompt completion or dismissal.
     /// Used to gate the weekly Sunday check-in to one prompt per Sunday.
@@ -31,6 +33,11 @@ pub struct NiyoraConfig {
     /// stored secret keeps mapping to the same server across reboots.
     #[serde(default)]
     pub companion_server_id: Option<String>,
+    /// Whether to register as a macOS Login Item so the tray icon
+    /// reappears after a reboot. Default `true` for new installs.
+    /// Persisted so the setting survives app updates.
+    #[serde(default = "default_true")]
+    pub launch_at_login: bool,
     /// Anonymous analytics consent. `None` = not asked yet, `Some(true)` =
     /// opted in, `Some(false)` = declined. Set on the onboarding consent slide.
     #[serde(default)]
@@ -39,6 +46,20 @@ pub struct NiyoraConfig {
     /// user opts in. Never tied to any personal information.
     #[serde(default)]
     pub analytics_id: Option<String>,
+}
+
+impl Default for NiyoraConfig {
+    fn default() -> Self {
+        Self {
+            last_pss4_date: None,
+            onboarded: false,
+            last_opened_date: None,
+            companion_server_id: None,
+            launch_at_login: true,
+            analytics_consent: None,
+            analytics_id: None,
+        }
+    }
 }
 
 pub fn config_path() -> Option<PathBuf> {

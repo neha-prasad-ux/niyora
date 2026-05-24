@@ -101,6 +101,33 @@ pub(crate) fn set_tray_state(app: &tauri::AppHandle, state: TrayState) {
     }
 }
 
+/// Returns the persisted launch-at-login preference.
+#[tauri::command]
+fn get_launch_at_login() -> bool {
+    config::load().launch_at_login
+}
+
+/// Updates the launch-at-login preference and syncs the OS registration.
+#[tauri::command]
+fn set_launch_at_login(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let mut cfg = config::load();
+    cfg.launch_at_login = enabled;
+    config::save(&cfg)?;
+    #[cfg(target_os = "macos")]
+    {
+        use tauri_plugin_autostart::ManagerExt;
+        let mgr = app.autolaunch();
+        if enabled {
+            mgr.enable().map_err(|e| e.to_string())?;
+        } else {
+            mgr.disable().map_err(|e| e.to_string())?;
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = app;
+    Ok(())
+}
+
 use crate::reminder::{LastSessionTime, SnoozedUntil};
 use crate::situational::{SituationalState, SituationalStateHandle};
 
@@ -265,6 +292,8 @@ fn main() {
             onboarding::request_notification_permission,
             telemetry::analytics_consent_status,
             telemetry::set_analytics_consent,
+            get_launch_at_login,
+            set_launch_at_login,
             #[cfg(target_os = "macos")]
             companion_sync::commands::companion_status,
             #[cfg(target_os = "macos")]
@@ -286,7 +315,12 @@ fn main() {
         .plugin(tauri_plugin_notification::init());
 
     #[cfg(target_os = "macos")]
-    let builder = builder.plugin(tauri_nspanel::init());
+    let builder = builder
+        .plugin(tauri_nspanel::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ));
     #[cfg(not(target_os = "macos"))]
     let builder = builder.manage(LastTrayToggle(last_tray_toggle.clone()));
 
@@ -340,6 +374,22 @@ fn main() {
 
             // Anonymous launch event. Stays local unless the user opted in.
             let _ = analytics::append_event("app_launched", serde_json::json!({}));
+
+            // Sync macOS Login Item registration with the persisted preference.
+            // Runs on every launch so the registration self-heals if the user
+            // deletes the LaunchAgent plist or upgrades the app.
+            #[cfg(target_os = "macos")]
+            {
+                use tauri_plugin_autostart::ManagerExt;
+                let mgr = app.handle().autolaunch();
+                let want = config::load().launch_at_login;
+                let have = mgr.is_enabled().unwrap_or(false);
+                if want && !have {
+                    let _ = mgr.enable();
+                } else if !want && have {
+                    let _ = mgr.disable();
+                }
+            }
 
             // Hide from dock — menu bar only
             #[cfg(target_os = "macos")]
