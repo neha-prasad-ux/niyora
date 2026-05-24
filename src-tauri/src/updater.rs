@@ -4,8 +4,10 @@
 // three kinds of outbound request, and nothing else.
 //  1. Update checks: a small JSON fetch to the endpoint configured in
 //     tauri.conf.json (downloads.niyora.com/latest.json). No telemetry is
-//     attached. This happens once at launch, and again every ~24h via a
-//     periodic background check (release builds only).
+//     attached. This happens:
+//     - Once at launch (all builds)
+//     - Every ~24h (±2h jitter) via a periodic background check (release only)
+//     - When the user clicks "Check for Updates..." in the tray menu
 //  2. Update downloads: when a check from (1) finds a newer version, the app
 //     fetches the full signed binary from downloads.niyora.com. On a periodic
 //     check this happens silently in the background; on a manual or launch
