@@ -3,7 +3,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { scoreToBallGradient } from "./useSnapshot";
 import PostSessionReveal from "./PostSessionReveal";
-import MeasureStressCard from "./MeasureStressCard";
 
 interface Props {
   onDone: () => void;
@@ -31,10 +30,6 @@ type Phase = "ask" | "thanks" | "reveal";
 export default function PostSessionMood({ onDone, sessionId, onSeeSoul }: Props) {
   const [phase, setPhase] = useState<Phase>("ask");
   const [hasBothCaptures, setHasBothCaptures] = useState(false);
-  // Tracks whether the user has tapped the measure CTA in this view ·
-  // gates the auto-dismiss timer so the reveal can take over once the
-  // result lands.
-  const [postPulseSent, setPostPulseSent] = useState(false);
 
   // We deliberately do not store the user's answer. The dots exist as a
   // moment of self-reflection, nothing more. The closing screen is the
@@ -77,15 +72,13 @@ export default function PostSessionMood({ onDone, sessionId, onSeeSoul }: Props)
 
   useEffect(() => {
     if (phase !== "thanks") return;
-    // If the user tapped Measure stress and the post result has not yet
-    // arrived, keep the panel open so the reveal can take over once both
-    // captures land. The reveal effect above will swap phase from
-    // "thanks" to "reveal" when that happens, and this effect's cleanup
-    // cancels any pending dismissal.
-    if (postPulseSent && !hasBothCaptures) return;
+    // Reveal effect above may still swap phase to "reveal" if a paired
+    // beta user took readings from My Soul; that re-runs this effect
+    // and the cleanup cancels the pending dismissal.
+    if (hasBothCaptures) return;
     const t = setTimeout(onDone, 2800);
     return () => clearTimeout(t);
-  }, [phase, onDone, postPulseSent, hasBothCaptures]);
+  }, [phase, onDone, hasBothCaptures]);
 
   // Reveal flow takes over the panel · its own Done button drives the
   // dismissal, the mood-dots auto-dismiss timer doesn't apply.
@@ -139,12 +132,6 @@ export default function PostSessionMood({ onDone, sessionId, onSeeSoul }: Props)
                 </div>
               ))}
             </div>
-            <MeasureStressCard
-              sessionId={sessionId}
-              phase="post"
-              techniqueName=""
-              onMeasureStarted={() => setPostPulseSent(true)}
-            />
             <button className="mood-skip" onClick={handleTap}>
               Skip
             </button>

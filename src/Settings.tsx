@@ -267,8 +267,6 @@ export default function Settings({ onBack, onOpenPss4 }: Props) {
           </button>
         </div>
 
-        <CompanionCard />
-
         <div className="soul-card soul-card-toggle">
           <div className="soul-toggle-row">
             <div className="soul-toggle-text">
@@ -304,6 +302,8 @@ export default function Settings({ onBack, onOpenPss4 }: Props) {
             Open
           </button>
         </div>
+
+        <CompanionCard />
 
         <div className="soul-footer">
           Niyora runs entirely on your Mac. No accounts, no profiles. Analytics are anonymous, optional, and only sent if you choose. Breathe easy.

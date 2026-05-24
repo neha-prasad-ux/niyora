@@ -125,12 +125,16 @@ export function CompanionCard() {
   return (
     <>
       <div className="soul-card soul-card-cta">
-        <div className="soul-cta-title">Connect your iPhone</div>
+        <div className="soul-cta-title">
+          Connect your iPhone
+          <span className="soul-beta-pill">Beta</span>
+        </div>
 
         {devices.length === 0 ? (
           <div className="soul-cta-blurb">
-            Pair your iPhone to see whether breathing actually moves your
-            heart rate variability. Stays on your devices, never the cloud.
+            Early access. Pair your iPhone to see whether breathing actually
+            moves your heart rate variability. Stays on your devices, never
+            the cloud.
           </div>
         ) : (
           <div className="companion-devices">
