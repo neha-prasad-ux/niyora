@@ -2,8 +2,12 @@
 //
 // Privacy contract (see /privacy/ on the marketing site): the app makes only
 // two kinds of outbound request, and nothing else.
-//  1. This update check, hitting the endpoint configured in tauri.conf.json
-//     (downloads.niyora.com/latest.json). No telemetry is attached to it.
+//  1. Update checks, hitting the endpoint configured in tauri.conf.json
+//     (downloads.niyora.com/latest.json). No telemetry is attached.
+//     This happens once at launch, and again every ~24h via a periodic
+//     background check (release builds only). When the periodic check finds
+//     an update, it downloads and installs the binary silently so the new
+//     version takes effect on the next natural app launch.
 //  2. Anonymous analytics events, but only if the user opted in on the
 //     onboarding consent slide. See telemetry.rs for exactly what is sent.
 //
@@ -11,17 +15,20 @@
 // - On launch, `check(app, false)` is called once. If a new version is found,
 //   the user gets a notification with "Update now" / "Later". No notification
 //   is shown if they're already on the latest version.
-// - The "Check for Updates…" tray menu item calls `check(app, true)`, which
+// - `start_periodic_check` re-checks every ~24h (jittered ±2h). If an update
+//   is found, it downloads and installs silently with no restart or UI.
+// - The "Check for Updates..." tray menu item calls `check(app, true)`, which
 //   additionally shows a "You're up to date" notification when there is no
-//   update available — so the user gets immediate feedback for a manual click.
+//   update available, so the user gets immediate feedback for a manual click.
 
 use tauri::AppHandle;
 use tauri_plugin_updater::UpdaterExt;
 
 /// Spawns a background thread that re-checks for updates every ~24h while the
-/// app is running. Jittered by ±2h to avoid thundering herd across installs.
-/// Silent: downloads the update in the background with no user-visible UI. The
-/// update applies on the next natural app launch (no forced restart).
+/// app is running. Jittered by +/-2h to avoid thundering herd across installs.
+/// Silent: downloads and installs the update in the background with no
+/// user-visible UI or restart. The new version takes effect on the next
+/// natural app launch.
 ///
 /// Release builds only. In debug builds this is a no-op so dev runs don't
 /// produce spurious network traffic.
@@ -32,7 +39,7 @@ pub fn start_periodic_check(app: AppHandle) {
 
     std::thread::spawn(move || {
         let base_secs: u64 = 24 * 60 * 60; // 24h
-        let jitter_range: u64 = 2 * 60 * 60; // ±2h
+        let jitter_range: u64 = 2 * 60 * 60; // +/-2h
 
         loop {
             let jitter: i64 = rand::thread_rng().gen_range(-(jitter_range as i64)..=(jitter_range as i64));
@@ -40,19 +47,34 @@ pub fn start_periodic_check(app: AppHandle) {
             std::thread::sleep(Duration::from_secs(sleep_secs));
 
             let app = app.clone();
-            tauri::async_runtime::spawn(async move {
-                let updater = match app.updater() {
-                    Ok(u) => u,
-                    Err(_) => return,
-                };
-                match updater.check().await {
-                    Ok(Some(update)) => {
-                        // Download silently. Install happens on next launch.
-                        let _ = update.download(|_, _| {}).await;
+            // If the async runtime has shut down (app teardown), spawn panics.
+            // Catch that to break out of the loop instead of spinning forever.
+            let ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                tauri::async_runtime::spawn(async move {
+                    let updater = match app.updater() {
+                        Ok(u) => u,
+                        Err(e) => {
+                            eprintln!("periodic updater init failed: {e}");
+                            return;
+                        }
+                    };
+                    match updater.check().await {
+                        Ok(Some(update)) => {
+                            if let Err(e) = update.download_and_install(|_, _| {}, || {}).await {
+                                eprintln!("periodic update install failed: {e}");
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(e) => {
+                            eprintln!("periodic update check failed: {e}");
+                        }
                     }
-                    _ => {}
-                }
-            });
+                });
+            }));
+            if ok.is_err() {
+                eprintln!("periodic updater: async runtime gone, stopping loop");
+                break;
+            }
         }
     });
 }
