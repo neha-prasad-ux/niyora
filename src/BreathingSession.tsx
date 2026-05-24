@@ -18,7 +18,6 @@ function intendedDurationSec(t: Technique): number {
   return t.prompts.reduce((sum, p) => sum + p.duration, 0);
 }
 import { scoreToBallGradient, scoreToOrbAccent, type SituationalSnapshot } from "./useSnapshot";
-import MeasureStressCard from "./MeasureStressCard";
 
 // --- Config ---
 const LG_WIDTH = 460;
@@ -1368,13 +1367,6 @@ export default function BreathingSession({ sessionId, onComplete, snapshot, comp
             >
               Try a different one
             </button>
-            <div className="info-fade-4" style={{ display: "flex", justifyContent: "center" }}>
-              <MeasureStressCard
-                sessionId={sessionId}
-                phase="pre"
-                techniqueName={stateRef.current.technique.name}
-              />
-            </div>
           </div>
         </div>
       )}
