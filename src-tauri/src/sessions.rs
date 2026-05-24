@@ -101,6 +101,30 @@ pub fn record_session(
     Ok(())
 }
 
+/// Record a session reported by the iOS companion over the v3 protocol.
+/// The companion supplies technique_name, duration, completed, and the
+/// ISO 8601 timestamp from the phone. A new session_id is minted here
+/// because the phone does not share the Mac's UUID namespace.
+pub fn record_companion_session(
+    technique_name: &str,
+    duration_sec: u64,
+    completed: bool,
+    recorded_at: &str,
+) -> Result<(), String> {
+    let path = sessions_path().ok_or_else(|| "Could not resolve sessions path".to_string())?;
+    let session_id = uuid::Uuid::new_v4().to_string();
+    append_session_line(
+        &path,
+        &session_id,
+        recorded_at,
+        technique_name,
+        "breathing",
+        duration_sec,
+        duration_sec,
+        completed,
+    )
+}
+
 /// Aggregate session stats for the My Soul panel.
 /// Only completed sessions count toward `completed` — abandoned sessions
 /// are recorded but don't progress the user's tier.
@@ -128,6 +152,37 @@ fn count_lines(path: &Path) -> SessionStats {
         }
     }
     SessionStats { completed, total }
+}
+
+/// Resolve the current Soul tier from completed session count. Mirrors
+/// the threshold table in `src/tiers.ts`. Returns the tier id string.
+pub fn current_soul_tier(completed: u32) -> &'static str {
+    const TIERS: &[(&str, u32)] = &[
+        ("spark", 0),
+        ("glow", 5),
+        ("shine", 15),
+        ("radiance", 40),
+        ("brilliance", 80),
+    ];
+    let mut current = "spark";
+    for &(id, threshold) in TIERS {
+        if completed >= threshold {
+            current = id;
+        }
+    }
+    current
+}
+
+/// Load session stats from the default path. Used by companion_sync to
+/// populate the StatusUpdate message.
+pub fn load_session_stats() -> SessionStats {
+    let Some(path) = sessions_path() else {
+        return SessionStats {
+            completed: 0,
+            total: 0,
+        };
+    };
+    count_lines(&path)
 }
 
 /// Dev-only: deletes the sessions log so the user appears as a brand new
@@ -280,4 +335,17 @@ mod tests {
         fs::remove_file(&path).ok();
     }
 
+    #[test]
+    fn soul_tier_thresholds_match_typescript() {
+        assert_eq!(current_soul_tier(0), "spark");
+        assert_eq!(current_soul_tier(4), "spark");
+        assert_eq!(current_soul_tier(5), "glow");
+        assert_eq!(current_soul_tier(14), "glow");
+        assert_eq!(current_soul_tier(15), "shine");
+        assert_eq!(current_soul_tier(39), "shine");
+        assert_eq!(current_soul_tier(40), "radiance");
+        assert_eq!(current_soul_tier(79), "radiance");
+        assert_eq!(current_soul_tier(80), "brilliance");
+        assert_eq!(current_soul_tier(999), "brilliance");
+    }
 }

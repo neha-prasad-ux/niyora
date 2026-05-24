@@ -34,7 +34,7 @@ use tokio::sync::{broadcast, Mutex};
 
 use super::history::{Phase, PhaseCapture};
 use super::pairing::PairingManager;
-use super::protocol::{ClientMessage, QrPayload, ServerMessage, PROTOCOL_VERSION};
+use super::protocol::{ClientMessage, QrPayload, ServerMessage, PROTOCOL_VERSION, PROTOCOL_VERSION_MIN};
 use super::queue::QueuedRequest;
 use super::state::PairedDevice;
 use super::{history, keychain, queue, state, MeasurementRequest};
@@ -248,14 +248,14 @@ impl CompanionSync {
         }
         let identify: ClientMessage =
             serde_json::from_str(line.trim()).map_err(|e| format!("identify decode: {e}"))?;
-        let (client_id, client_name, pairing_id) = match identify {
+        let (client_id, client_name, pairing_id, peer_protocol) = match identify {
             ClientMessage::Identify {
                 protocol,
                 client_id,
                 client_name,
                 pairing_id,
             } => {
-                if protocol != PROTOCOL_VERSION {
+                if protocol < PROTOCOL_VERSION_MIN || protocol > PROTOCOL_VERSION {
                     write_message(
                         &mut write_half,
                         &ServerMessage::AuthFailed {
@@ -266,7 +266,7 @@ impl CompanionSync {
                     .ok();
                     return Err(format!("client protocol={protocol}"));
                 }
-                (client_id, client_name, pairing_id)
+                (client_id, client_name, pairing_id, protocol)
             }
             other => return Err(format!("expected identify, got {other:?}")),
         };
@@ -374,8 +374,23 @@ impl CompanionSync {
         write_message(&mut write_half, &ServerMessage::Authed).await?;
         self.emit_state().await;
         eprintln!(
-            "[companion_sync] peer {addr} authed as client_id={client_id} ({client_name})"
+            "[companion_sync] peer {addr} authed as client_id={client_id} ({client_name}) protocol=v{peer_protocol}"
         );
+
+        // 4b. Send current Soul tier + session count to v3+ companions
+        // so paired mode can display Mac-side progression.
+        if peer_protocol >= 3 {
+            let stats = crate::sessions::load_session_stats();
+            let tier = crate::sessions::current_soul_tier(stats.completed);
+            write_message(
+                &mut write_half,
+                &ServerMessage::StatusUpdate {
+                    soul_tier: tier.to_string(),
+                    completed_sessions: stats.completed,
+                },
+            )
+            .await?;
+        }
 
         // 5. Drain the queue for this client_id.
         for entry in queue::pending_for(&client_id) {
@@ -443,6 +458,46 @@ impl CompanionSync {
                                     };
                                     if let Err(e) = history::merge(&session_id, p, capture) {
                                         eprintln!("[companion_sync] history merge failed: {e}");
+                                    }
+                                    self.emit_state().await;
+                                }
+                                Ok(ClientMessage::SessionRecorded {
+                                    technique_name,
+                                    duration_sec,
+                                    completed,
+                                    recorded_at,
+                                }) => {
+                                    if peer_protocol < 3 {
+                                        eprintln!("[companion_sync] session_recorded from v{peer_protocol} peer, ignoring");
+                                        incoming.clear();
+                                        continue;
+                                    }
+                                    eprintln!(
+                                        "[companion_sync] session_recorded technique={technique_name} \
+                                         duration={duration_sec}s completed={completed} at={recorded_at}"
+                                    );
+                                    if let Err(e) = crate::sessions::record_companion_session(
+                                        &technique_name,
+                                        duration_sec,
+                                        completed,
+                                        &recorded_at,
+                                    ) {
+                                        eprintln!("[companion_sync] session persist failed: {e}");
+                                    }
+                                    // Send updated tier info back to the companion.
+                                    let stats = crate::sessions::load_session_stats();
+                                    let tier = crate::sessions::current_soul_tier(stats.completed);
+                                    if let Err(e) = write_message(
+                                        &mut write_half,
+                                        &ServerMessage::StatusUpdate {
+                                            soul_tier: tier.to_string(),
+                                            completed_sessions: stats.completed,
+                                        },
+                                    )
+                                    .await
+                                    {
+                                        eprintln!("[companion_sync] status_update write failed: {e}");
+                                        return Ok(());
                                     }
                                     self.emit_state().await;
                                 }
