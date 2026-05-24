@@ -39,6 +39,10 @@ pub struct NiyoraConfig {
     /// user opts in. Never tied to any personal information.
     #[serde(default)]
     pub analytics_id: Option<String>,
+    /// Preferred ambient track for breathing sessions: "serene", "ocean",
+    /// "forest", or "random". None treated as "random".
+    #[serde(default)]
+    pub preferred_track: Option<String>,
 }
 
 pub fn config_path() -> Option<PathBuf> {
@@ -55,4 +59,16 @@ pub fn save(cfg: &NiyoraConfig) -> Result<(), String> {
     let path = config_path().ok_or_else(|| "Could not resolve config directory".to_string())?;
     let json = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
     std::fs::write(&path, json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_preferred_track() -> String {
+    load().preferred_track.unwrap_or_else(|| "random".to_string())
+}
+
+#[tauri::command]
+pub fn set_preferred_track(track: String) -> Result<(), String> {
+    let mut cfg = load();
+    cfg.preferred_track = Some(track);
+    save(&cfg)
 }

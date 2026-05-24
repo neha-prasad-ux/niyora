@@ -378,7 +378,19 @@ function createState(w: number, h: number, completedSessions?: number, forceBoxB
 // =====================================================================
 // AUDIO
 // =====================================================================
-const AMBIENT_TRACKS = ["/audio/serene.mp3", "/audio/ocean.mp3", "/audio/forest.wav"];
+const AMBIENT_TRACKS: Record<string, string> = {
+  serene: "/audio/serene.mp3",
+  ocean: "/audio/ocean.mp3",
+  forest: "/audio/forest.wav",
+};
+const TRACK_KEYS = Object.keys(AMBIENT_TRACKS) as Array<keyof typeof AMBIENT_TRACKS>;
+
+function resolveTrack(pref: string): string {
+  if (pref === "random" || !AMBIENT_TRACKS[pref]) {
+    return AMBIENT_TRACKS[TRACK_KEYS[Math.floor(Math.random() * TRACK_KEYS.length)]];
+  }
+  return AMBIENT_TRACKS[pref];
+}
 
 // =====================================================================
 // BUTTON PARTICLES
@@ -466,6 +478,8 @@ export default function BreathingSession({ sessionId, onComplete, snapshot, comp
   const sizeRef = useRef({ w: LG_WIDTH, h: LG_HEIGHT });
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [muted, setMuted] = useState(false);
+  const [preferredTrack, setPreferredTrack] = useState("random");
+  const [showTrackMenu, setShowTrackMenu] = useState(false);
   const [waiting, setWaiting] = useState(true);
   const [transitioning, setTransitioning] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -610,13 +624,17 @@ export default function BreathingSession({ sessionId, onComplete, snapshot, comp
     };
   }, []);
 
+  // Load persisted track preference on mount.
+  useEffect(() => {
+    invoke<string>("get_preferred_track").then(setPreferredTrack).catch(() => {});
+  }, []);
+
   // Background audio — starts only after the user clicks Begin (so the panel
   // can pop up silently and the user controls when the soundscape kicks in).
   // Fades in on start, fades out on unmount.
   useEffect(() => {
     if (waiting) return;
-    const track = AMBIENT_TRACKS[Math.floor(Math.random() * AMBIENT_TRACKS.length)];
-    const audio = new Audio(track);
+    const audio = new Audio(resolveTrack(preferredTrack));
     audio.loop = true;
     audio.volume = 0;
     audioRef.current = audio;
@@ -1444,6 +1462,66 @@ export default function BreathingSession({ sessionId, onComplete, snapshot, comp
               })}
             </div>
           </div>
+        </div>
+      )}
+      {/* Top-right: Track selector (left of mute, only on pre-session screen) */}
+      {waiting && (
+        <div style={{ position: "absolute", top: 8, right: 68, zIndex: 11 }}>
+          <button
+            onClick={() => setShowTrackMenu((v) => !v)}
+            className="niyora-tip"
+            data-tooltip="Soundscape"
+            title="Soundscape"
+            style={{
+              width: 26, height: 26,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              background: showTrackMenu ? "rgba(255,255,255,0.12)" : "transparent",
+              border: "none", color: showTrackMenu ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.55)",
+              cursor: "pointer", borderRadius: 6, transition: "all 0.2s ease", outline: "none",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.95)"; e.currentTarget.style.background = "rgba(255,255,255,0.12)"; }}
+            onMouseLeave={(e) => { if (!showTrackMenu) { e.currentTarget.style.color = "rgba(255,255,255,0.55)"; e.currentTarget.style.background = "transparent"; } }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 18V5l12-2v13" />
+              <circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
+            </svg>
+          </button>
+          {showTrackMenu && (
+            <div style={{
+              position: "absolute", top: 30, right: 0,
+              background: "rgba(20, 18, 30, 0.92)",
+              backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)",
+              border: "1px solid rgba(255,255,255,0.12)",
+              borderRadius: 8, padding: "4px 0",
+              minWidth: 120, boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
+            }}>
+              {([["random", "Random"], ["serene", "Serene"], ["ocean", "Ocean"], ["forest", "Forest"]] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => {
+                    setPreferredTrack(key);
+                    setShowTrackMenu(false);
+                    invoke("set_preferred_track", { track: key }).catch(() => {});
+                  }}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    width: "100%", padding: "6px 12px",
+                    background: "transparent", border: "none",
+                    color: preferredTrack === key ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.6)",
+                    fontSize: 12, fontFamily: "'Poppins', sans-serif", fontWeight: preferredTrack === key ? 500 : 300,
+                    cursor: "pointer", textAlign: "left", outline: "none",
+                    transition: "background 0.15s ease",
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.08)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                >
+                  <span style={{ width: 12, textAlign: "center", fontSize: 10, opacity: preferredTrack === key ? 1 : 0 }}>&#10003;</span>
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
       {/* Top-right: Mute/unmute (left of close) */}

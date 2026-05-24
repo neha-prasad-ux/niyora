@@ -265,6 +265,8 @@ fn main() {
             onboarding::request_notification_permission,
             telemetry::analytics_consent_status,
             telemetry::set_analytics_consent,
+            config::get_preferred_track,
+            config::set_preferred_track,
             #[cfg(target_os = "macos")]
             companion_sync::commands::companion_status,
             #[cfg(target_os = "macos")]
