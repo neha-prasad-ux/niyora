@@ -18,6 +18,49 @@
 use tauri::AppHandle;
 use tauri_plugin_updater::UpdaterExt;
 
+/// Spawns a background thread that re-checks for updates every ~24h while the
+/// app is running. Jittered by ±2h to avoid thundering herd across installs.
+/// Silent: downloads the update in the background with no user-visible UI. The
+/// update applies on the next natural app launch (no forced restart).
+///
+/// Release builds only. In debug builds this is a no-op so dev runs don't
+/// produce spurious network traffic.
+#[cfg(not(debug_assertions))]
+pub fn start_periodic_check(app: AppHandle) {
+    use rand::Rng;
+    use std::time::Duration;
+
+    std::thread::spawn(move || {
+        let base_secs: u64 = 24 * 60 * 60; // 24h
+        let jitter_range: u64 = 2 * 60 * 60; // ±2h
+
+        loop {
+            let jitter: i64 = rand::thread_rng().gen_range(-(jitter_range as i64)..=(jitter_range as i64));
+            let sleep_secs = (base_secs as i64 + jitter).max(60) as u64;
+            std::thread::sleep(Duration::from_secs(sleep_secs));
+
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let updater = match app.updater() {
+                    Ok(u) => u,
+                    Err(_) => return,
+                };
+                match updater.check().await {
+                    Ok(Some(update)) => {
+                        // Download silently. Install happens on next launch.
+                        let _ = update.download(|_, _| {}).await;
+                    }
+                    _ => {}
+                }
+            });
+        }
+    });
+}
+
+#[cfg(debug_assertions)]
+pub fn start_periodic_check(_app: AppHandle) {}
+
+
 pub fn check(app: AppHandle, prompt_when_current: bool) {
     tauri::async_runtime::spawn(async move {
         let updater = match app.updater() {
