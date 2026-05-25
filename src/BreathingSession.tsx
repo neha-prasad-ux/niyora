@@ -477,6 +477,7 @@ export default function BreathingSession({ sessionId, onComplete, snapshot, comp
   const rafRef = useRef<number>(0);
   const sizeRef = useRef({ w: LG_WIDTH, h: LG_HEIGHT });
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const trackMenuRef = useRef<HTMLDivElement | null>(null);
   const [muted, setMuted] = useState(false);
   const [preferredTrack, setPreferredTrack] = useState("random");
   const [showTrackMenu, setShowTrackMenu] = useState(false);
@@ -629,6 +630,20 @@ export default function BreathingSession({ sessionId, onComplete, snapshot, comp
     invoke<string>("get_preferred_track").then(setPreferredTrack).catch(() => {});
   }, []);
 
+  // Close the track dropdown when the user clicks anywhere outside it.
+  // Same dismiss semantics as every other popover-style UI in the app.
+  useEffect(() => {
+    if (!showTrackMenu) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const root = trackMenuRef.current;
+      if (root && !root.contains(e.target as Node)) {
+        setShowTrackMenu(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [showTrackMenu]);
+
   // Background audio — starts only after the user clicks Begin (so the panel
   // can pop up silently and the user controls when the soundscape kicks in).
   // Fades in on start, fades out on unmount.
@@ -656,7 +671,7 @@ export default function BreathingSession({ sessionId, onComplete, snapshot, comp
         if (v <= 0) { clearInterval(fadeOut); audio.pause(); }
       }, 50);
     };
-  }, [waiting]);
+  }, [waiting, preferredTrack]);
 
 
   useEffect(() => {
@@ -1466,7 +1481,7 @@ export default function BreathingSession({ sessionId, onComplete, snapshot, comp
       )}
       {/* Top-right: Track selector (left of mute, only on pre-session screen) */}
       {waiting && (
-        <div style={{ position: "absolute", top: 8, right: 68, zIndex: 11 }}>
+        <div ref={trackMenuRef} style={{ position: "absolute", top: 8, right: 68, zIndex: 11 }}>
           <button
             onClick={() => setShowTrackMenu((v) => !v)}
             className="niyora-tip"

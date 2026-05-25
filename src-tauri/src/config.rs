@@ -66,8 +66,16 @@ pub fn get_preferred_track() -> String {
     load().preferred_track.unwrap_or_else(|| "random".to_string())
 }
 
+/// Allowed values for the preferred track. Anything else is rejected so the
+/// config file does not become a junk drawer of arbitrary IPC strings.
+/// Kept in sync with `AMBIENT_TRACKS` / `resolveTrack` in BreathingSession.tsx.
+const ALLOWED_TRACKS: &[&str] = &["random", "serene", "ocean", "forest"];
+
 #[tauri::command]
 pub fn set_preferred_track(track: String) -> Result<(), String> {
+    if !ALLOWED_TRACKS.contains(&track.as_str()) {
+        return Err(format!("unknown track: {track}"));
+    }
     let mut cfg = load();
     cfg.preferred_track = Some(track);
     save(&cfg)
