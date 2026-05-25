@@ -1,23 +1,17 @@
 #!/usr/bin/env node
 /**
  * Generate public/tier-colors.json from src/tiers.ts canonical values.
- * Run via: node scripts/generate-tier-colors-json.mjs
+ * Run via: node --import tsx/esm scripts/generate-tier-colors-json.mjs
+ * (requires tsx: pnpm add -D tsx)
  */
 
 import { writeFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { TIER_COLORS } from "../src/tiers.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
-const TIER_COLORS = {
-  spark:      { hue: 30,  saturation: 70, lightness: 60 },
-  glow:       { hue: 335, saturation: 70, lightness: 60 },
-  shine:      { hue: 280, saturation: 65, lightness: 60 },
-  radiance:   { hue: 230, saturation: 65, lightness: 60 },
-  brilliance: { hue: 210, saturation: 60, lightness: 60 },
-};
 
 const output = {
   version: 1,
