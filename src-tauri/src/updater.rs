@@ -28,63 +28,96 @@
 use tauri::AppHandle;
 use tauri_plugin_updater::UpdaterExt;
 
-/// Spawns a background thread that re-checks for updates every ~24h while the
-/// app is running. Jittered by +/-2h to avoid thundering herd across installs.
+/// Spawns a tokio task that re-checks for updates every ~24h while the app is
+/// running. Jittered by +/-2h to avoid thundering herd across installs.
 /// Silent: downloads and installs the update in the background with no
 /// user-visible UI or restart. The new version takes effect on the next
 /// natural app launch.
+///
+/// Lifecycle: the task runs on `tauri::async_runtime`, so it is automatically
+/// aborted when the runtime shuts down (e.g. on `app.exit(0)` from the tray
+/// Quit menu). No manual shutdown signal needed.
+///
+/// First periodic check fires after a 10-minute warm-up rather than 24 hours,
+/// so an update released within the first day of an install gets adopted on
+/// the same day instead of the day after. The launch-time `check()` still
+/// runs separately at startup, so the warm-up is purely a fallback for
+/// updates that land during the first 24 hours of uptime.
 ///
 /// Release builds only. In debug builds this is a no-op so dev runs don't
 /// produce spurious network traffic.
 #[cfg(not(debug_assertions))]
 pub fn start_periodic_check(app: AppHandle) {
-    use rand::Rng;
     use std::time::Duration;
 
-    std::thread::spawn(move || {
-        let base_secs: u64 = 24 * 60 * 60; // 24h
-        let jitter_range: u64 = 2 * 60 * 60; // +/-2h
+    tauri::async_runtime::spawn(async move {
+        // Short warm-up before the first periodic round so the launch-time
+        // `check()` has a clean window to finish on cold start.
+        tokio::time::sleep(Duration::from_secs(10 * 60)).await;
 
         loop {
-            let jitter: i64 = rand::thread_rng().gen_range(-(jitter_range as i64)..=(jitter_range as i64));
-            let sleep_secs = (base_secs as i64 + jitter).max(60) as u64;
-            std::thread::sleep(Duration::from_secs(sleep_secs));
-
-            let app = app.clone();
-            // If the async runtime has shut down (app teardown), spawn panics.
-            // Catch that to break out of the loop instead of spinning forever.
-            let ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                tauri::async_runtime::spawn(async move {
-                    let updater = match app.updater() {
-                        Ok(u) => u,
-                        Err(e) => {
-                            eprintln!("periodic updater init failed: {e}");
-                            return;
-                        }
-                    };
-                    match updater.check().await {
-                        Ok(Some(update)) => {
-                            if let Err(e) = update.download_and_install(|_, _| {}, || {}).await {
-                                eprintln!("periodic update install failed: {e}");
-                            }
-                        }
-                        Ok(None) => {}
-                        Err(e) => {
-                            eprintln!("periodic update check failed: {e}");
-                        }
-                    }
-                });
-            }));
-            if ok.is_err() {
-                eprintln!("periodic updater: async runtime gone, stopping loop");
-                break;
-            }
+            run_one_check(&app).await;
+            sleep_jittered(24 * 60 * 60, 2 * 60 * 60).await;
         }
     });
 }
 
 #[cfg(debug_assertions)]
 pub fn start_periodic_check(_app: AppHandle) {}
+
+#[cfg(not(debug_assertions))]
+async fn run_one_check(app: &AppHandle) {
+    let updater = match app.updater() {
+        Ok(u) => u,
+        Err(e) => {
+            eprintln!("[updater] periodic init failed: {e}");
+            return;
+        }
+    };
+
+    match updater.check().await {
+        Ok(Some(update)) => {
+            // Coarse milestone logging at every 25% so a stalled download
+            // is visible in stderr without spamming the log on a typical
+            // 100MB install. Metered-network detection is a known gap (see
+            // privacy contract above); platform-specific NWPathMonitor /
+            // Windows NetworkInformation integration is tracked separately.
+            let progress = |downloaded: u64, total: Option<u64>| {
+                if let Some(total) = total.filter(|&t| t > 0) {
+                    let curr_pct = (downloaded as f64 / total as f64 * 100.0) as u32;
+                    let prev = downloaded.saturating_sub(1);
+                    let prev_pct = (prev as f64 / total as f64 * 100.0) as u32;
+                    if curr_pct / 25 != prev_pct / 25 {
+                        eprintln!(
+                            "[updater] periodic download progress: {curr_pct}% \
+                             ({downloaded}/{total} bytes)"
+                        );
+                    }
+                }
+            };
+            let on_finished = || eprintln!("[updater] periodic download complete");
+            if let Err(e) = update.download_and_install(progress, on_finished).await {
+                eprintln!("[updater] periodic install failed: {e}");
+            }
+        }
+        Ok(None) => {}
+        Err(e) => {
+            eprintln!("[updater] periodic check failed: {e}");
+        }
+    }
+}
+
+#[cfg(not(debug_assertions))]
+async fn sleep_jittered(base_secs: u64, jitter_range_secs: u64) {
+    use rand::Rng;
+    use std::time::Duration;
+    let jitter: i64 = rand::thread_rng()
+        .gen_range(-(jitter_range_secs as i64)..=(jitter_range_secs as i64));
+    // Floor at 60s so the loop never tight-spins if `base_secs` is ever
+    // changed to a smaller value during testing.
+    let sleep_secs = (base_secs as i64 + jitter).max(60) as u64;
+    tokio::time::sleep(Duration::from_secs(sleep_secs)).await;
+}
 
 
 pub fn check(app: AppHandle, prompt_when_current: bool) {

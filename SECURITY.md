@@ -30,6 +30,12 @@ Out of scope:
 
 ## What Niyora does and doesn't do
 
-Niyora makes no outbound network requests from the app. It reads passive system signals (screen idle time, frontmost app, mic device state, system-wide event counters) to time reminders, but none of this is stored or transmitted. All session data is written locally to your app's container.
+Niyora reads passive system signals (screen idle time, frontmost app, mic device state, system-wide event counters) to time reminders. None of this is stored or transmitted. All session data is written locally to your app's container.
 
-If you find a way to make Niyora exfiltrate user data or violate any of these guarantees, that's a critical issue — please report it.
+The app makes outbound network requests in exactly three cases, all to first-party endpoints with no telemetry attached:
+
+1. **Update checks** — a small JSON fetch to `downloads.niyora.com/latest.json` on launch, every ~24h while running, and when you click "Check for Updates" in the tray menu. Release builds only.
+2. **Update downloads** — when (1) finds a new version, the signed binary is fetched from `downloads.niyora.com`. Manual / launch-time checks prompt you first; the periodic check downloads silently.
+3. **Anonymous analytics** — only if you opted in on the onboarding consent slide. See [telemetry.rs](src-tauri/src/telemetry.rs) for the exact event list.
+
+If you find a way to make Niyora exfiltrate user data or violate any of these guarantees, that's a critical issue. Please report it.
