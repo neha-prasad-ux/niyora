@@ -1,0 +1,521 @@
+name: Release
+
+# Two release channels, both driven by the tag you push:
+#
+#   v1.3.0-beta.1   (any hyphen suffix)  -> STAGING
+#   v1.3.0          (clean semver)        -> PRODUCTION
+#
+# Staging builds use src-tauri/tauri.staging.conf.json: a separate bundle
+# identifier (com.niyora.breathing.staging) and product name ("Niyora
+# Staging"), with the updater pointed at downloads.niyora.com/staging.json.
+# So a staging build coexists with the real app and never touches real users'
+# data or update feed.
+#
+# To promote staging to production: tag the SAME commit with the clean
+# version (v1.3.0). Production rebuilds from identical code with the
+# production identifier and endpoint, and writes latest.json.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.1.0). Leave empty to use the current commit SHA."
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, sign, notarize (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Apple Silicon
+            runner: macos-latest
+            target: aarch64-apple-darwin
+            arch: aarch64
+            suffix: AppleSilicon
+            updater_platform: darwin-aarch64
+          - name: Intel
+            runner: macos-latest
+            target: x86_64-apple-darwin
+            arch: x86_64
+            suffix: Intel
+            updater_platform: darwin-x86_64
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine release channel
+        id: channel
+        run: |
+          set -eo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          # A hyphen in the tag (v1.3.0-beta.1, v1.3.0-rc.1) means staging.
+          if [[ "$TAG" == *-* ]]; then
+            echo "channel=staging" >> "$GITHUB_OUTPUT"
+            echo "artifact_prefix=Niyora-Staging" >> "$GITHUB_OUTPUT"
+            echo "tauri_config_args=--config src-tauri/tauri.staging.conf.json" >> "$GITHUB_OUTPUT"
+          else
+            echo "channel=production" >> "$GITHUB_OUTPUT"
+            echo "artifact_prefix=Niyora" >> "$GITHUB_OUTPUT"
+            echo "tauri_config_args=" >> "$GITHUB_OUTPUT"
+          fi
+          cat "$GITHUB_OUTPUT"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Import Developer ID cert into temp keychain
+        env:
+          P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.APPLE_CERT_P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -eo pipefail
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          P12_PATH="$RUNNER_TEMP/cert.p12"
+
+          echo "$P12_BASE64" | base64 --decode > "$P12_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          security import "$P12_PATH" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$P12_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security \
+            -T /usr/bin/productsign
+
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Make this keychain the default search list (login still searchable for Apple roots)
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+
+          security find-identity -v -p codesigning
+
+          rm -f "$P12_PATH"
+
+      - name: Build, sign, and notarize (Tauri bundler)
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # Tauri updater signing key — produces .app.tar.gz.sig alongside the bundle.
+          # Shared across channels: the same pubkey is baked into both the
+          # production and staging configs, so staging.json signatures verify.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm tauri build --target ${{ matrix.target }} ${{ steps.channel.outputs.tauri_config_args }}
+
+      - name: Verify signatures and notarization
+        run: |
+          MACOS_DIR="src-tauri/target/${{ matrix.target }}/release/bundle/macos"
+          DMG_DIR="src-tauri/target/${{ matrix.target }}/release/bundle/dmg"
+          # Staging builds produce "Niyora Staging.app"; resolve the bundle by glob.
+          APP=$(find "$MACOS_DIR" -maxdepth 1 -name '*.app' | head -1)
+
+          echo "=== App: $APP ==="
+          echo "=== App signature ==="
+          codesign -dv --verbose=4 "$APP" 2>&1 | head -20
+          echo "=== Notarization staple on .app ==="
+          xcrun stapler validate "$APP" || echo "(app not stapled, may be stapled to dmg only)"
+          echo "=== DMG list ==="
+          ls -la "$DMG_DIR"
+          echo "=== Notarization staple on .dmg ==="
+          for d in "$DMG_DIR"/*.dmg; do
+            xcrun stapler validate "$d" || true
+          done
+          echo "=== Gatekeeper assessment ==="
+          spctl -a -t open --context context:primary-signature -v "$DMG_DIR"/*.dmg || true
+          echo "=== Updater bundle ==="
+          ls -la "$MACOS_DIR"
+
+      - name: Stage canonically named release files
+        id: stage
+        run: |
+          set -eo pipefail
+          DMG_DIR="src-tauri/target/${{ matrix.target }}/release/bundle/dmg"
+          MACOS_DIR="src-tauri/target/${{ matrix.target }}/release/bundle/macos"
+          REF="${GITHUB_REF_NAME#v}"
+          [ -z "$REF" ] && REF="$(git rev-parse --short HEAD)"
+          PREFIX="${{ steps.channel.outputs.artifact_prefix }}"
+
+          STAGED="release-files"
+          mkdir -p "$STAGED"
+
+          # DMG
+          DMG_SRC=$(find "$DMG_DIR" -maxdepth 1 -name '*.dmg' | head -1)
+          DMG_DEST="$STAGED/${PREFIX}-${REF}-${{ matrix.suffix }}.dmg"
+          cp "$DMG_SRC" "$DMG_DEST"
+
+          # Updater bundle (.app.tar.gz) and detached signature (.sig)
+          TGZ_SRC=$(find "$MACOS_DIR" -maxdepth 1 -name '*.app.tar.gz' | head -1)
+          SIG_SRC=$(find "$MACOS_DIR" -maxdepth 1 -name '*.app.tar.gz.sig' | head -1)
+          TGZ_DEST="$STAGED/${PREFIX}-${REF}-${{ matrix.suffix }}.app.tar.gz"
+          SIG_DEST="$STAGED/${PREFIX}-${REF}-${{ matrix.suffix }}.app.tar.gz.sig"
+          cp "$TGZ_SRC" "$TGZ_DEST"
+          cp "$SIG_SRC" "$SIG_DEST"
+
+          {
+            echo "version=$REF"
+            echo "dmg=$(basename "$DMG_DEST")"
+            echo "tgz=$(basename "$TGZ_DEST")"
+            echo "sig=$(basename "$SIG_DEST")"
+            echo "tgz_path=$TGZ_DEST"
+            echo "sig_path=$SIG_DEST"
+            echo "platform=${{ matrix.updater_platform }}"
+          } >> "$GITHUB_OUTPUT"
+
+          ls -la "$STAGED"
+
+      - name: Install wrangler
+        run: npm install -g wrangler
+
+      - name: Upload signed DMG and updater bundle to Cloudflare R2
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -eo pipefail
+          BUCKET="niyora-downloads"
+          DMG="release-files/${{ steps.stage.outputs.dmg }}"
+          TGZ="release-files/${{ steps.stage.outputs.tgz }}"
+          SIG="release-files/${{ steps.stage.outputs.sig }}"
+
+          wrangler r2 object put "$BUCKET/${{ steps.stage.outputs.dmg }}" \
+            --file "$DMG" \
+            --content-type "application/x-apple-diskimage" \
+            --remote
+
+          wrangler r2 object put "$BUCKET/${{ steps.stage.outputs.tgz }}" \
+            --file "$TGZ" \
+            --content-type "application/gzip" \
+            --remote
+
+          wrangler r2 object put "$BUCKET/${{ steps.stage.outputs.sig }}" \
+            --file "$SIG" \
+            --content-type "text/plain" \
+            --remote
+
+      - name: Emit per-arch updater metadata for the publish job
+        run: |
+          set -eo pipefail
+          mkdir -p updater-meta
+          cat > "updater-meta/${{ matrix.updater_platform }}.json" <<EOF
+          {
+            "platform": "${{ steps.stage.outputs.platform }}",
+            "version": "${{ steps.stage.outputs.version }}",
+            "tgz": "${{ steps.stage.outputs.tgz }}",
+            "sig_file": "${{ steps.stage.outputs.sig }}",
+            "signature_inline": "$(cat "${{ steps.stage.outputs.sig_path }}" | tr -d '\n' | sed 's/"/\\"/g')"
+          }
+          EOF
+          cat "updater-meta/${{ matrix.updater_platform }}.json"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: niyora-${{ matrix.arch }}
+          path: |
+            release-files/*.dmg
+            release-files/*.app.tar.gz
+            release-files/*.app.tar.gz.sig
+            updater-meta/*.json
+          if-no-files-found: error
+
+      - name: Clean up keychain
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/build.keychain-db" || true
+
+  release-windows:
+    name: Build Windows installer (NSIS, unsigned for v1)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine release channel
+        id: channel
+        shell: bash
+        run: |
+          set -eo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          # A hyphen in the tag (v1.3.0-beta.1, v1.3.0-rc.1) means staging.
+          if [[ "$TAG" == *-* ]]; then
+            echo "artifact_prefix=Niyora-Staging" >> "$GITHUB_OUTPUT"
+            echo "tauri_config_args=--config src-tauri/tauri.staging.conf.json" >> "$GITHUB_OUTPUT"
+          else
+            echo "artifact_prefix=Niyora" >> "$GITHUB_OUTPUT"
+            echo "tauri_config_args=" >> "$GITHUB_OUTPUT"
+          fi
+          cat "$GITHUB_OUTPUT"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build NSIS installer (Tauri bundler)
+        env:
+          # Tauri updater signing key — same key as macOS, used here to sign
+          # the .nsis.zip updater bundle so the in-app updater accepts it.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        # --bundles nsis skips MSI (would need WiX) and any other targets.
+        run: pnpm tauri build --target x86_64-pc-windows-msvc --bundles nsis ${{ steps.channel.outputs.tauri_config_args }}
+
+      - name: Stage canonically named release files
+        id: stage
+        shell: bash
+        run: |
+          set -eo pipefail
+          NSIS_DIR="src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis"
+          REF="${GITHUB_REF_NAME#v}"
+          [ -z "$REF" ] && REF="$(git rev-parse --short HEAD)"
+
+          STAGED="release-files"
+          mkdir -p "$STAGED"
+
+          # Tauri 2 NSIS bundler emits the installer and a detached signature
+          # directly on the .exe (no .nsis.zip wrapper). The updater plugin
+          # downloads and runs the .exe directly.
+          EXE_SRC=$(find "$NSIS_DIR" -maxdepth 1 -name '*-setup.exe' | head -1)
+          SIG_SRC=$(find "$NSIS_DIR" -maxdepth 1 -name '*-setup.exe.sig' | head -1)
+
+          if [ -z "$EXE_SRC" ] || [ -z "$SIG_SRC" ]; then
+            echo "Missing bundle outputs. EXE=$EXE_SRC SIG=$SIG_SRC"
+            ls -la "$NSIS_DIR"
+            exit 1
+          fi
+
+          PREFIX="${{ steps.channel.outputs.artifact_prefix }}"
+          EXE_DEST="$STAGED/${PREFIX}-${REF}-Windows-x64.exe"
+          SIG_DEST="$STAGED/${PREFIX}-${REF}-Windows-x64.exe.sig"
+
+          cp "$EXE_SRC" "$EXE_DEST"
+          cp "$SIG_SRC" "$SIG_DEST"
+
+          {
+            echo "version=$REF"
+            echo "exe=$(basename "$EXE_DEST")"
+            echo "sig=$(basename "$SIG_DEST")"
+            echo "sig_path=$SIG_DEST"
+            echo "platform=windows-x86_64"
+          } >> "$GITHUB_OUTPUT"
+
+          ls -la "$STAGED"
+
+      - name: Install wrangler
+        run: npm install -g wrangler
+
+      - name: Upload installer and signature to Cloudflare R2
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -eo pipefail
+          BUCKET="niyora-downloads"
+          EXE="release-files/${{ steps.stage.outputs.exe }}"
+          SIG="release-files/${{ steps.stage.outputs.sig }}"
+
+          wrangler r2 object put "$BUCKET/${{ steps.stage.outputs.exe }}" \
+            --file "$EXE" \
+            --content-type "application/vnd.microsoft.portable-executable" \
+            --remote
+
+          wrangler r2 object put "$BUCKET/${{ steps.stage.outputs.sig }}" \
+            --file "$SIG" \
+            --content-type "text/plain" \
+            --remote
+
+      - name: Emit updater metadata for the publish job
+        shell: bash
+        run: |
+          set -eo pipefail
+          mkdir -p updater-meta
+          cat > "updater-meta/windows-x86_64.json" <<EOF
+          {
+            "platform": "${{ steps.stage.outputs.platform }}",
+            "version": "${{ steps.stage.outputs.version }}",
+            "exe": "${{ steps.stage.outputs.exe }}",
+            "sig_file": "${{ steps.stage.outputs.sig }}",
+            "signature_inline": "$(cat "${{ steps.stage.outputs.sig_path }}" | tr -d '\n' | sed 's/"/\\"/g')"
+          }
+          EOF
+          cat "updater-meta/windows-x86_64.json"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: niyora-windows-x86_64
+          path: |
+            release-files/*.exe
+            release-files/*.exe.sig
+            updater-meta/*.json
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release + updater manifest
+    needs: [release, release-windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine release channel
+        id: channel
+        run: |
+          set -eo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          # Must match the detection in the `release` job above.
+          if [[ "$TAG" == *-* ]]; then
+            echo "channel=staging" >> "$GITHUB_OUTPUT"
+            echo "manifest=staging.json" >> "$GITHUB_OUTPUT"
+            echo "artifact_prefix=Niyora-Staging" >> "$GITHUB_OUTPUT"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "channel=production" >> "$GITHUB_OUTPUT"
+            echo "manifest=latest.json" >> "$GITHUB_OUTPUT"
+            echo "artifact_prefix=Niyora" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+          cat "$GITHUB_OUTPUT"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect installers and updater files
+        run: |
+          set -eo pipefail
+          mkdir -p release-files
+          PREFIX="${{ steps.channel.outputs.artifact_prefix }}"
+          # Pull canonically named installers and updater bundles produced
+          # by the mac matrix and the Windows job.
+          find artifacts -name "${PREFIX}-*-*.dmg" -exec cp {} release-files/ \;
+          find artifacts -name "${PREFIX}-*-*.app.tar.gz" -exec cp {} release-files/ \;
+          find artifacts -name "${PREFIX}-*-*.app.tar.gz.sig" -exec cp {} release-files/ \;
+          find artifacts -name "${PREFIX}-*-*.exe" -exec cp {} release-files/ \;
+          find artifacts -name "${PREFIX}-*-*.exe.sig" -exec cp {} release-files/ \;
+          ls -la release-files
+
+      - name: Build updater manifest
+        id: manifest
+        run: |
+          set -eo pipefail
+          REF="${GITHUB_REF_NAME#v}"
+          PREFIX="${{ steps.channel.outputs.artifact_prefix }}"
+          MANIFEST="${{ steps.channel.outputs.manifest }}"
+
+          ARM_SIG_FILE=$(find release-files -name "${PREFIX}-${REF}-AppleSilicon.app.tar.gz.sig" | head -1)
+          INTEL_SIG_FILE=$(find release-files -name "${PREFIX}-${REF}-Intel.app.tar.gz.sig" | head -1)
+          WIN_SIG_FILE=$(find release-files -name "${PREFIX}-${REF}-Windows-x64.exe.sig" | head -1)
+
+          if [ -z "$ARM_SIG_FILE" ] || [ -z "$INTEL_SIG_FILE" ] || [ -z "$WIN_SIG_FILE" ]; then
+            echo "Missing signature files. ARM=$ARM_SIG_FILE INTEL=$INTEL_SIG_FILE WIN=$WIN_SIG_FILE"
+            ls release-files
+            exit 1
+          fi
+
+          ARM_SIG=$(cat "$ARM_SIG_FILE")
+          INTEL_SIG=$(cat "$INTEL_SIG_FILE")
+          WIN_SIG=$(cat "$WIN_SIG_FILE")
+          PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          # Notes: pull the tag's release notes if available; fallback to a generic line.
+          NOTES="See https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }} for release notes."
+
+          jq -n \
+            --arg version "$REF" \
+            --arg notes "$NOTES" \
+            --arg pub_date "$PUB_DATE" \
+            --arg arm_url "https://downloads.niyora.com/${PREFIX}-${REF}-AppleSilicon.app.tar.gz" \
+            --arg arm_sig "$ARM_SIG" \
+            --arg intel_url "https://downloads.niyora.com/${PREFIX}-${REF}-Intel.app.tar.gz" \
+            --arg intel_sig "$INTEL_SIG" \
+            --arg win_url "https://downloads.niyora.com/${PREFIX}-${REF}-Windows-x64.exe" \
+            --arg win_sig "$WIN_SIG" \
+            '{
+              version: $version,
+              notes: $notes,
+              pub_date: $pub_date,
+              platforms: {
+                "darwin-aarch64": { signature: $arm_sig, url: $arm_url },
+                "darwin-x86_64":  { signature: $intel_sig, url: $intel_url },
+                "windows-x86_64": { signature: $win_sig, url: $win_url }
+              }
+            }' > "release-files/${MANIFEST}"
+
+          echo "--- ${MANIFEST} ---"
+          cat "release-files/${MANIFEST}"
+
+      - name: Install wrangler
+        run: npm install -g wrangler
+
+      - name: Upload updater manifest to Cloudflare R2
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          MANIFEST="${{ steps.channel.outputs.manifest }}"
+          wrangler r2 object put \
+            "niyora-downloads/${MANIFEST}" \
+            --file "release-files/${MANIFEST}" \
+            --content-type "application/json" \
+            --remote
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Niyora ${{ github.ref_name }}
+          generate_release_notes: true
+          prerelease: ${{ steps.channel.outputs.prerelease }}
+          files: |
+            release-files/*.dmg
+            release-files/*.exe
+            release-files/${{ steps.channel.outputs.manifest }}

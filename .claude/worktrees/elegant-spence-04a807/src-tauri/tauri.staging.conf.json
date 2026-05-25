@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Niyora Staging",
+  "identifier": "com.niyora.breathing.staging",
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://downloads.niyora.com/staging.json"
+      ]
+    }
+  }
+}

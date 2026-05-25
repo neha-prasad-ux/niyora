@@ -112,6 +112,25 @@ export default function Settings({ onBack, onOpenPss4 }: Props) {
     });
   }, []);
 
+  // Launch at login: defaults to true for new installs.
+  const [launchAtLogin, setLaunchAtLogin] = useState<boolean | null>(null);
+  useEffect(() => {
+    invoke<boolean>("get_launch_at_login")
+      .then(setLaunchAtLogin)
+      .catch(() => setLaunchAtLogin(null));
+  }, []);
+  const toggleLaunchAtLogin = (next: boolean) => {
+    setLaunchAtLogin(next);
+    invoke("set_launch_at_login", { enabled: next }).catch(() => {
+      // Re-fetch the truth from the backend rather than reverting.
+      // The backend may have persisted config but failed OS registration,
+      // so the prior value is not necessarily correct.
+      invoke<boolean>("get_launch_at_login")
+        .then(setLaunchAtLogin)
+        .catch(() => setLaunchAtLogin(!next));
+    });
+  };
+
   // Analytics consent: `null` while loading or if the backend is unavailable,
   // then `true` / `false` per the onboarding choice. Saved immediately on toggle.
   const [analyticsOn, setAnalyticsOn] = useState<boolean | null>(null);
@@ -266,6 +285,27 @@ export default function Settings({ onBack, onOpenPss4 }: Props) {
             {pss4History.length === 0 ? "Begin" : "Take again"}
           </button>
         </div>
+
+        {launchAtLogin !== null && (
+          <div className="soul-card soul-card-toggle">
+            <div className="soul-toggle-row">
+              <div className="soul-toggle-text">
+                <div className="soul-cta-title">Launch at login</div>
+                <div className="soul-cta-blurb">
+                  Start Niyora when your Mac starts so reminders are always ready.
+                </div>
+              </div>
+              <label className="soul-switch" aria-label="Toggle launch at login">
+                <input
+                  type="checkbox"
+                  checked={launchAtLogin}
+                  onChange={(e) => toggleLaunchAtLogin(e.target.checked)}
+                />
+                <span className="soul-switch-track" />
+              </label>
+            </div>
+          </div>
+        )}
 
         <div className="soul-card soul-card-toggle">
           <div className="soul-toggle-row">

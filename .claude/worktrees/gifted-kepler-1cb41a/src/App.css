@@ -1,0 +1,1468 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  font-family: 'Poppins', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+@keyframes fadeSlideUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.info-fade-1 { animation: fadeSlideUp 0.8s ease-out 0.1s both; }
+.info-fade-2 { animation: fadeSlideUp 0.8s ease-out 0.4s both; }
+.info-fade-3 { animation: fadeSlideUp 0.8s ease-out 0.7s both; }
+.info-fade-4 { animation: fadeSlideUp 0.8s ease-out 1.0s both; }
+
+/* Begin button transition */
+@keyframes orbExpand {
+  0%   { transform: scale(1); opacity: 0.7; }
+  30%  { transform: scale(6); opacity: 0.5; }
+  70%  { transform: scale(25); opacity: 0.2; }
+  100% { transform: scale(40); opacity: 0; }
+}
+
+@keyframes contentFadeOut {
+  0%   { opacity: 1; filter: blur(0); transform: scale(1); }
+  100% { opacity: 0; filter: blur(6px); transform: scale(0.98); }
+}
+
+@keyframes backdropFadeOut {
+  0%   { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.begin-orb {
+  position: absolute;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(160, 140, 240, 0.4) 0%, rgba(130, 100, 200, 0.15) 40%, transparent 65%);
+  pointer-events: none;
+  animation: orbExpand 1.4s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}
+
+.info-exit-content {
+  animation: contentFadeOut 0.9s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.info-exit-backdrop {
+  animation: backdropFadeOut 1.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* Stress ball — Venus-style gas planet with atmospheric haze.
+   Color = Niyora Index. Bright luminous crescent on lit side, dim shadowed
+   side, organic cloud whorls slowly drifting across for rotation. */
+@keyframes stressBallBreathe {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.04); }
+}
+@keyframes stressBallSpin {
+  from { background-position: 0 50%; }
+  to   { background-position: -240px 50%; }
+}
+.stress-ball {
+  position: relative;
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  overflow: hidden;
+  transition: background 0.8s ease, box-shadow 0.8s ease;
+  animation: stressBallBreathe 5.5s ease-in-out infinite;
+  pointer-events: none;
+}
+/* Organic atmospheric cloud whorls — drift across the surface to fake rotation.
+   Tile is 240px wide. All gradient centers stay within 30%-70% of tile and
+   fall off well before tile edges, so the repeat seam is invisible. */
+/* Cloud whorls. Hue and visibility are driven by --orb-hue and --orb-cloud
+   CSS variables set inline by BreathingSession from the current stress
+   score. At calm (score >= 80) the strength is 0 so the orb reads as clean
+   and resolved; at higher stress the clouds darken/lighten in the tier hue. */
+/* Cloud whorls — only lighter highlights in the orb's own hue, so the
+   surface reads as gently swirling rather than smudged with shadow. */
+.stress-ball::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(ellipse 80px 32px at 30% 28%, hsla(var(--orb-hue, 220), 45%, 82%, calc(0.50 * var(--orb-cloud, 0))), transparent 75%),
+    radial-gradient(ellipse 70px 26px at 50% 60%, hsla(var(--orb-hue, 220), 40%, 78%, calc(0.36 * var(--orb-cloud, 0))), transparent 75%),
+    radial-gradient(ellipse 75px 28px at 65% 42%, hsla(var(--orb-hue, 220), 40%, 78%, calc(0.28 * var(--orb-cloud, 0))), transparent 75%),
+    radial-gradient(ellipse 90px 30px at 38% 78%, hsla(var(--orb-hue, 220), 50%, 50%, calc(0.22 * var(--orb-cloud, 0))), transparent 75%),
+    radial-gradient(ellipse 70px 32px at 60% 22%, hsla(var(--orb-hue, 220), 50%, 50%, calc(0.18 * var(--orb-cloud, 0))), transparent 75%);
+  background-size: 240px 100%;
+  background-repeat: repeat-x;
+  animation: stressBallSpin 30s linear infinite;
+  pointer-events: none;
+  opacity: var(--orb-cloud, 0);
+  transition: opacity 0.8s ease;
+}
+/* Bright atmospheric limb crescent — emphasises the lit edge (upper-left) */
+.stress-ball::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    circle at 28% 22%,
+    rgba(255, 255, 255, 0.45) 0%,
+    rgba(255, 255, 255, 0.18) 14%,
+    transparent 42%
+  );
+  pointer-events: none;
+}
+
+/* --- Settings panel --- */
+.niyora-gear-btn {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+  border-radius: 6px;
+  z-index: 10;
+  transition: all 0.2s ease;
+  outline: none;
+}
+.niyora-gear-btn:hover {
+  color: rgba(255, 255, 255, 0.95);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* Reliable CSS tooltip — Tauri's WKWebView often suppresses native title= tooltips,
+   so any button that adds the .niyora-tip class plus data-tooltip="..." gets a
+   custom one that renders predictably below the button on hover.
+   No `position: relative` here — every button this class is applied to already
+   has its own positioning, and adding it would clobber `position: absolute`. */
+.niyora-tip::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 6px;
+  padding: 4px 9px;
+  background: rgba(0, 0, 0, 0.82);
+  color: rgba(255, 255, 255, 0.95);
+  font-family: 'Poppins', sans-serif;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.3px;
+  border-radius: 5px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+  z-index: 100;
+}
+.niyora-tip:hover::after { opacity: 1; }
+
+/* The profile/gear icon lives in the panel's top-left corner, so its
+   centered tooltip would clip off the left edge. Anchor it to the left
+   side of the button instead so it grows to the right inside the panel. */
+.niyora-gear-btn.niyora-tip::after {
+  left: 0;
+  transform: none;
+}
+
+.niyora-settings {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 16px;
+  overflow: hidden;
+  font-family: 'Poppins', sans-serif;
+  color: rgba(255, 255, 255, 0.85);
+}
+.settings-backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 30% 20%, hsla(270, 50%, 25%, 0.7) 0%, transparent 60%),
+    radial-gradient(circle at 70% 80%, hsla(220, 50%, 18%, 0.7) 0%, transparent 60%),
+    rgba(10, 8, 20, 0.92);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+.settings-content {
+  position: relative;
+  z-index: 1;
+  padding: 44px 28px 24px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  box-sizing: border-box;
+}
+.settings-back {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  outline: none;
+}
+.settings-back:hover:not(:disabled) {
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.08);
+}
+.settings-back:disabled { opacity: 0.4; cursor: default; }
+
+.settings-eyebrow {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.4);
+  margin-bottom: 4px;
+}
+.settings-title {
+  font-size: 20px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.95);
+  margin-bottom: 6px;
+}
+.settings-blurb {
+  font-size: 12px;
+  font-weight: 300;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.55);
+  margin-bottom: 18px;
+}
+.settings-blurb-foot {
+  margin-top: auto;
+  margin-bottom: 0;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+/* --- Today panel --- */
+.today-hero {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 18px 0 24px;
+}
+.today-orb {
+  position: absolute;
+  width: 180px;
+  height: 180px;
+  top: -10px;
+  border-radius: 50%;
+  pointer-events: none;
+  filter: blur(8px);
+  transition: background 0.8s ease;
+}
+.today-score {
+  position: relative;
+  font-size: 44px;
+  font-weight: 300;
+  letter-spacing: -1px;
+  color: rgba(255, 255, 255, 0.95);
+  line-height: 1;
+}
+.today-label {
+  position: relative;
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.today-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+.today-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12px;
+}
+.today-row-label {
+  color: rgba(255, 255, 255, 0.5);
+  font-weight: 300;
+}
+.today-row-value {
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 500;
+}
+.today-badge {
+  display: inline-block;
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 4px 10px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  border-radius: 12px;
+  background: hsla(265, 55%, 55%, 0.2);
+  border: 1px solid hsla(265, 55%, 65%, 0.4);
+  color: rgba(255, 255, 255, 0.85);
+}
+.today-badge-warm {
+  background: hsla(20, 60%, 55%, 0.2);
+  border-color: hsla(20, 60%, 65%, 0.4);
+}
+
+/* --- Post-session mood tap --- */
+.niyora-mood {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 16px;
+  overflow: hidden;
+  font-family: 'Poppins', sans-serif;
+  color: rgba(255, 255, 255, 0.85);
+}
+.mood-backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% 35%, hsla(250, 50%, 35%, 0.6) 0%, transparent 60%),
+    radial-gradient(circle at 50% 85%, hsla(265, 50%, 22%, 0.5) 0%, transparent 60%),
+    rgba(10, 8, 20, 0.92);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+.mood-content {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  gap: 18px;
+  animation: fadeSlideUp 0.6s ease-out both;
+}
+.mood-orb {
+  width: 110px;
+  height: 110px;
+  border-radius: 50%;
+  margin-bottom: 4px;
+  animation: stressBallBreathe 6s ease-in-out infinite;
+  pointer-events: none;
+}
+.mood-eyebrow {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.4);
+}
+.mood-question {
+  font-size: 19px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.92);
+}
+.mood-dots {
+  display: flex;
+  gap: 14px;
+  margin-top: 4px;
+  align-items: flex-start;
+}
+.mood-dot-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.mood-dot {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+  outline: none;
+  padding: 0;
+}
+.mood-dot:hover {
+  transform: scale(1.18);
+  border-color: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 22px rgba(255, 255, 255, 0.22);
+}
+.mood-dot-label {
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.5px;
+  color: rgba(255, 255, 255, 0.55);
+  text-transform: lowercase;
+}
+.mood-dot-wrap:hover .mood-dot-label {
+  color: rgba(255, 255, 255, 0.9);
+}
+.mood-thanks {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  animation: fadeSlideUp 0.5s ease-out both;
+  margin-top: 8px;
+}
+.mood-thanks-line {
+  font-size: 19px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.95);
+}
+.mood-thanks-sub {
+  font-size: 13px;
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.6);
+  letter-spacing: 0.5px;
+}
+.mood-dot-1 { background: hsla(30, 70%, 60%, 0.7); }
+.mood-dot-2 { background: hsla(20, 60%, 55%, 0.65); }
+.mood-dot-3 { background: hsla(335, 50%, 60%, 0.6); }
+.mood-dot-4 { background: hsla(265, 55%, 65%, 0.55); }
+.mood-dot-5 { background: hsla(250, 60%, 90%, 0.6); }
+.mood-skip {
+  margin-top: 6px;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  font-family: 'Poppins', sans-serif;
+  font-size: 12px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  padding: 6px 14px;
+  border-radius: 14px;
+  transition: color 0.2s ease, background 0.2s ease;
+}
+.mood-skip:hover:not(:disabled) {
+  color: rgba(255, 255, 255, 0.75);
+  background: rgba(255, 255, 255, 0.06);
+}
+.mood-skip:disabled { opacity: 0.4; cursor: default; }
+
+/* --- PSS-4 weekly check-in --- */
+.niyora-pss4 {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 16px;
+  overflow: hidden;
+  font-family: 'Poppins', sans-serif;
+  color: rgba(255, 255, 255, 0.85);
+}
+.pss4-backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 30% 25%, hsla(265, 50%, 30%, 0.6) 0%, transparent 60%),
+    radial-gradient(circle at 70% 90%, hsla(220, 50%, 22%, 0.5) 0%, transparent 60%),
+    rgba(10, 8, 20, 0.94);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+.pss4-content {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 36px 28px 22px;
+  animation: fadeSlideUp 0.5s ease-out both;
+}
+.pss4-back {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  outline: none;
+  z-index: 5;
+}
+.pss4-back:hover:not(:disabled) {
+  color: rgba(255, 255, 255, 0.95);
+  background: rgba(255, 255, 255, 0.12);
+}
+.pss4-back:disabled { opacity: 0.4; cursor: default; }
+
+.pss4-eyebrow {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.4);
+  margin-bottom: 14px;
+}
+.pss4-prefix {
+  font-size: 12px;
+  font-weight: 300;
+  letter-spacing: 1px;
+  color: rgba(255, 255, 255, 0.55);
+  margin-bottom: 4px;
+}
+.pss4-question {
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.95);
+  margin-bottom: 18px;
+}
+.pss4-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pss4-option {
+  width: 100%;
+  text-align: left;
+  padding: 11px 16px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.88);
+  font-family: 'Poppins', sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  cursor: pointer;
+  outline: none;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+.pss4-option:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: hsla(265, 50%, 65%, 0.5);
+}
+.pss4-option:disabled { opacity: 0.4; cursor: default; }
+.pss4-skip {
+  margin-top: auto;
+  align-self: center;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  font-family: 'Poppins', sans-serif;
+  font-size: 11px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  padding: 6px 12px;
+  border-radius: 12px;
+  transition: color 0.2s ease, background 0.2s ease;
+}
+.pss4-skip:hover:not(:disabled) {
+  color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.06);
+}
+.pss4-skip:disabled { opacity: 0.4; cursor: default; }
+
+/* PSS-4 result screen */
+.pss4-result {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 36px 28px 28px;
+  gap: 10px;
+}
+.pss4-score-wrap {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 6px;
+}
+.pss4-score-num {
+  font-size: 56px;
+  font-weight: 200;
+  letter-spacing: 1px;
+  line-height: 1;
+}
+.pss4-score-out {
+  font-size: 12px;
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.45);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+.pss4-band {
+  font-size: 22px;
+  font-weight: 400;
+  margin-top: 4px;
+  letter-spacing: 0.5px;
+}
+.pss4-band-msg {
+  font-size: 14px;
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.78);
+  line-height: 1.5;
+  max-width: 280px;
+  margin-top: 2px;
+}
+.pss4-result-note {
+  font-size: 12px;
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.5);
+  line-height: 1.55;
+  max-width: 280px;
+  margin-top: 18px;
+}
+.pss4-result-btn {
+  margin-top: 22px;
+  padding: 9px 22px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.92);
+  font-family: 'Poppins', sans-serif;
+  font-size: 13px;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  outline: none;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+.pss4-result-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+/* First-session AHA screen */
+.niyora-aha {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 16px;
+  overflow: hidden;
+  font-family: 'Poppins', sans-serif;
+  color: rgba(255, 255, 255, 0.92);
+}
+.aha-backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% 30%, hsla(250, 60%, 38%, 0.7) 0%, transparent 60%),
+    radial-gradient(circle at 50% 90%, hsla(265, 50%, 22%, 0.55) 0%, transparent 60%),
+    rgba(8, 6, 18, 0.94);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+.aha-snow {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+.aha-content {
+  position: relative;
+  z-index: 2;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 36px 28px;
+  gap: 10px;
+  text-align: center;
+  animation: fadeSlideUp 0.7s ease-out both;
+}
+.aha-eyebrow {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+  margin-bottom: 6px;
+}
+.aha-headline {
+  font-size: 24px;
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.98);
+  letter-spacing: 0.5px;
+}
+.aha-sub {
+  font-size: 15px;
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.78);
+  line-height: 1.5;
+  max-width: 280px;
+}
+.aha-continue {
+  margin-top: 24px;
+  padding: 10px 26px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: rgba(255, 255, 255, 0.95);
+  font-family: 'Poppins', sans-serif;
+  font-size: 13px;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  outline: none;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+.aha-continue:hover {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.5);
+  transform: translateY(-1px);
+}
+
+/* ============================================================ */
+/* My Soul panel — replaces the old "Settings" today-only panel */
+/* ============================================================ */
+.niyora-soul {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 16px;
+  overflow: hidden;
+  font-family: 'Poppins', sans-serif;
+  color: rgba(255, 255, 255, 0.85);
+}
+.soul-backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 30% 15%, hsla(270, 50%, 28%, 0.7) 0%, transparent 60%),
+    radial-gradient(circle at 70% 85%, hsla(220, 50%, 18%, 0.7) 0%, transparent 60%),
+    rgba(10, 8, 20, 0.95);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+.soul-content {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  padding: 36px 22px 18px;
+  box-sizing: border-box;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.soul-content::-webkit-scrollbar { width: 6px; }
+.soul-content::-webkit-scrollbar-track { background: transparent; }
+.soul-content::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+}
+
+.soul-close {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  outline: none;
+  z-index: 5;
+}
+.soul-close:hover {
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.soul-header {
+  text-align: center;
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: 1px;
+  color: rgba(255, 255, 255, 0.9);
+  margin-bottom: 4px;
+}
+
+/* Planet + Saturn-style rings */
+.soul-planet-wrap {
+  position: relative;
+  width: 100%;
+  height: 150px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 4px 0 2px;
+}
+.soul-planet {
+  width: 110px;
+  height: 110px;
+  border-radius: 50%;
+  position: relative;
+  z-index: 2;
+  transition: background 0.8s ease, box-shadow 0.8s ease;
+}
+.soul-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border-style: solid;
+  border-width: 1.5px;
+  border-radius: 50%;
+  background: transparent;
+  transform: translate(-50%, -50%) rotateX(72deg) rotateZ(-18deg);
+  pointer-events: none;
+  z-index: 1;
+}
+/* Make every other ring sit just behind the planet for depth */
+.soul-ring:nth-child(even) {
+  z-index: 3;
+  transform: translate(-50%, -50%) rotateX(72deg) rotateZ(-18deg) translateY(-2px);
+}
+
+.soul-stress {
+  text-align: center;
+  font-size: 13px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.75);
+  margin: 2px 0 8px;
+}
+
+/* Card base */
+.soul-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+/* Sessions + tier progress */
+.soul-card-progress { gap: 6px; align-items: stretch; }
+.soul-tier-headline {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  width: 100%;
+  margin-bottom: 4px;
+}
+.soul-tier-name {
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+}
+.soul-tier-sub {
+  font-size: 11px;
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.5);
+  letter-spacing: 0.3px;
+}
+.soul-sessions-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.soul-sessions-num {
+  font-size: 22px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.95);
+  line-height: 1;
+}
+.soul-sessions-label {
+  font-size: 11px;
+  font-weight: 300;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+/* Tier track + markers */
+.soul-tier-track {
+  position: relative;
+  width: 100%;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  margin: 8px 0 22px;
+}
+.soul-tier-track-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 2px;
+  transition: width 0.6s ease, background 0.6s ease;
+}
+.soul-tier-marker {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1.5px solid;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.85);
+  transition: all 0.4s ease;
+  cursor: default;
+  user-select: none;
+}
+.soul-tier-marker:not(.is-reached) .soul-tier-marker-num {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.soul-spark {
+  display: block;
+  margin: 4px auto 8px;
+}
+
+/* CTA cards (PSS-4, founder, app store) */
+.soul-card-cta { gap: 8px; }
+.soul-cta-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.92);
+}
+.soul-cta-blurb {
+  font-size: 11px;
+  font-weight: 300;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.55);
+  margin-bottom: 8px;
+  max-width: 260px;
+}
+.soul-cta-btn {
+  display: inline-block;
+  padding: 8px 28px;
+  border-radius: 22px;
+  background: linear-gradient(135deg, hsla(270, 50%, 45%, 0.85), hsla(280, 40%, 35%, 0.85));
+  border: 1px solid hsla(270, 40%, 55%, 0.3);
+  color: rgba(255, 255, 255, 0.95);
+  font-family: 'Poppins', sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  text-decoration: none;
+  outline: none;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 14px hsla(270, 50%, 40%, 0.25);
+}
+.soul-cta-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, hsla(270, 55%, 50%, 0.95), hsla(280, 45%, 40%, 0.95));
+  box-shadow: 0 6px 20px hsla(270, 50%, 40%, 0.4);
+}
+.soul-cta-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.soul-card-cta.is-placeholder { opacity: 0.65; }
+
+.soul-footer {
+  text-align: center;
+  font-size: 11.5px;
+  font-weight: 400;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.78);
+  padding: 12px 8px 6px;
+  user-select: none;
+  max-width: 340px;
+  margin: 0 auto;
+}
+
+/* ============================================================ */
+/* Pre-session secondary action + technique picker overlay */
+/* ============================================================ */
+.info-secondary-btn {
+  margin-top: 14px;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.55);
+  font-family: 'Poppins', sans-serif;
+  font-size: 12px;
+  letter-spacing: 0.4px;
+  cursor: pointer;
+  padding: 6px 14px;
+  border-radius: 14px;
+  transition: color 0.2s ease, background 0.2s ease;
+  outline: none;
+}
+.info-secondary-btn:hover:not(:disabled) {
+  color: rgba(255, 255, 255, 0.95);
+  background: rgba(255, 255, 255, 0.06);
+}
+.info-secondary-btn:disabled { opacity: 0.4; cursor: default; }
+
+.picker-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 11;
+  border-radius: 16px;
+  overflow: hidden;
+  font-family: 'Poppins', sans-serif;
+}
+.picker-backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 30% 15%, hsla(270, 50%, 28%, 0.7) 0%, transparent 60%),
+    radial-gradient(circle at 70% 85%, hsla(220, 50%, 18%, 0.7) 0%, transparent 60%),
+    rgba(10, 8, 20, 0.96);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+.picker-content {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  padding: 36px 18px 14px;
+  box-sizing: border-box;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  color: rgba(255, 255, 255, 0.88);
+}
+.picker-content::-webkit-scrollbar { width: 6px; }
+.picker-content::-webkit-scrollbar-track { background: transparent; }
+.picker-content::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+}
+.picker-back {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+  border-radius: 6px;
+  z-index: 5;
+  transition: all 0.2s ease;
+  outline: none;
+}
+.picker-back:hover {
+  color: rgba(255, 255, 255, 0.95);
+  background: rgba(255, 255, 255, 0.12);
+}
+.picker-title {
+  text-align: center;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  color: rgba(255, 255, 255, 0.92);
+}
+.picker-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.picker-section-label {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.4);
+  margin: 4px 4px 4px;
+}
+.picker-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  font-family: 'Poppins', sans-serif;
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+  transition: background 0.18s ease, border-color 0.18s ease, transform 0.12s ease;
+}
+.picker-row:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: hsla(265, 50%, 65%, 0.5);
+}
+.picker-row:active:not(:disabled) {
+  transform: scale(0.99);
+}
+.picker-row.is-locked {
+  cursor: default;
+  background: rgba(255, 255, 255, 0.02);
+  border-color: rgba(255, 255, 255, 0.05);
+}
+.picker-row.is-locked .picker-row-name { color: rgba(255, 255, 255, 0.55); }
+.picker-row.is-locked .picker-row-sub { color: rgba(255, 255, 255, 0.5); }
+.picker-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.picker-row-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.92);
+}
+.picker-row-sub {
+  font-size: 12px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.78);
+}
+.picker-lock {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* ============================================================ */
+/* First-launch onboarding — 3 auto-sliding screens + Begin */
+/* ============================================================ */
+.niyora-onboarding {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 16px;
+  overflow: hidden;
+  font-family: 'Poppins', sans-serif;
+  color: rgba(255, 255, 255, 0.92);
+}
+.onboarding-backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 30% 25%, hsla(265, 55%, 32%, 0.7) 0%, transparent 60%),
+    radial-gradient(circle at 75% 80%, hsla(220, 45%, 22%, 0.7) 0%, transparent 60%),
+    rgba(8, 6, 18, 0.96);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+.onboarding-content {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 36px 28px 28px;
+  box-sizing: border-box;
+}
+
+/* Progress dots at the top */
+.onboarding-dots {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 36px;
+}
+.onboarding-dot {
+  width: 24px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.15);
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  outline: none;
+  transition: background 0.4s ease, width 0.4s ease;
+}
+.onboarding-dot.is-passed { background: rgba(255, 255, 255, 0.45); }
+.onboarding-dot.is-current {
+  background: hsla(265, 70%, 75%, 1);
+  width: 32px;
+}
+
+/* The slide content. Re-keyed on index → fresh animation each transition. */
+.onboarding-slide {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 14px;
+  animation: onboardingFadeIn 0.6s cubic-bezier(0.4, 0, 0.2, 1) both;
+  max-width: 320px;
+}
+@keyframes onboardingFadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.onboarding-logo {
+  width: 56px;
+  height: 56px;
+  margin-bottom: 8px;
+  opacity: 0.95;
+  filter: drop-shadow(0 4px 16px rgba(160, 130, 255, 0.35));
+}
+.onboarding-eyebrow {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+}
+.onboarding-title {
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: -0.2px;
+  color: rgba(255, 255, 255, 0.97);
+}
+.onboarding-body {
+  font-size: 13.5px;
+  font-weight: 400;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+/* Staggered checklist — bullets fade in one at a time so the user reads
+   each promise sequentially. animationDelay is set inline per item. */
+.onboarding-checklist {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+  width: 100%;
+}
+.onboarding-bullet {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 12.5px;
+  font-weight: 400;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.85);
+  opacity: 0;
+  animation: onboardingFadeIn 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+.onboarding-check {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: hsla(265, 60%, 55%, 0.4);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.onboarding-btn {
+  margin-top: 24px;
+  padding: 12px 56px;
+  border-radius: 28px;
+  background: linear-gradient(135deg, hsla(270, 55%, 50%, 0.9), hsla(280, 45%, 38%, 0.9));
+  border: 1px solid hsla(270, 50%, 60%, 0.35);
+  color: rgba(255, 255, 255, 0.96);
+  font-family: 'Poppins', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 1.5px;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.25s ease;
+  box-shadow: 0 6px 20px hsla(270, 50%, 40%, 0.35), inset 0 1px 0 hsla(270, 60%, 70%, 0.18);
+}
+.onboarding-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, hsla(270, 60%, 55%, 1), hsla(280, 50%, 42%, 1));
+  box-shadow: 0 8px 28px hsla(270, 50%, 40%, 0.5), inset 0 1px 0 hsla(270, 60%, 70%, 0.25);
+}
+.onboarding-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+  box-shadow: 0 4px 14px hsla(270, 50%, 40%, 0.2);
+}
+
+/* "I live up here" pointer on the first onboarding slide.
+   Anchors visually to the menu bar so users know where to find Niyora. */
+.onboarding-here {
+  position: absolute;
+  top: 8px;
+  right: 18px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  color: hsla(265, 65%, 80%, 0.85);
+  pointer-events: none;
+  animation: onboardingHerePulse 3.4s ease-in-out infinite;
+}
+.onboarding-here-arrow {
+  filter: drop-shadow(0 0 6px hsla(265, 70%, 60%, 0.45));
+}
+.onboarding-here-text {
+  font-family: 'Poppins', sans-serif;
+  font-size: 10px;
+  letter-spacing: 0.6px;
+  font-weight: 400;
+  color: hsla(265, 35%, 88%, 0.78);
+}
+@keyframes onboardingHerePulse {
+  0%, 100% { transform: translateY(0); opacity: 0.78; }
+  50%      { transform: translateY(-3px); opacity: 1; }
+}
+
+/* ============================================================ */
+/* Dev-only stress-tier preview controls                         */
+/* ============================================================ */
+.dev-controls {
+  position: absolute;
+  bottom: 6px;
+  left: 6px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 5px 6px;
+  background: rgba(20, 18, 30, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  font-family: 'Poppins', sans-serif;
+  pointer-events: auto;
+}
+.dev-controls-label {
+  font-size: 8px;
+  letter-spacing: 1.2px;
+  color: rgba(255, 255, 255, 0.4);
+  text-transform: uppercase;
+  text-align: center;
+}
+.dev-controls-row {
+  display: flex;
+  gap: 3px;
+}
+.dev-controls-btn {
+  padding: 2px 6px;
+  font-size: 9px;
+  font-family: 'Poppins', sans-serif;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.15s ease;
+}
+.dev-controls-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.95);
+}
+.dev-controls-btn.is-current {
+  background: hsla(265, 60%, 45%, 0.6);
+  border-color: hsla(265, 60%, 65%, 0.7);
+  color: rgba(255, 255, 255, 1);
+}
+
+.soul-dev-tiers {
+  margin-top: 12px;
+  padding: 8px;
+  background: rgba(20, 18, 30, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+}
+.soul-dev-label {
+  font-size: 8px;
+  letter-spacing: 1.2px;
+  color: rgba(255, 255, 255, 0.4);
+  text-transform: uppercase;
+  text-align: center;
+  margin-bottom: 4px;
+}
+.soul-dev-row {
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.soul-dev-btn {
+  padding: 3px 7px;
+  font-size: 9px;
+  font-family: 'Poppins', sans-serif;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.15s ease;
+}
+.soul-dev-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.95);
+}
+.soul-dev-btn.is-current {
+  background: hsla(265, 60%, 45%, 0.6);
+  border-color: hsla(265, 60%, 65%, 0.7);
+  color: rgba(255, 255, 255, 1);
+}
+
+/* Locked rows: float the tooltip just below the lock chip on the right side.
+   "Below" is preferred over "above" so the tooltip never gets clipped by the
+   picker-content scroll container at the very top. */
+.picker-row.is-locked.niyora-tip::after {
+  top: 100%;
+  left: auto;
+  right: 8px;
+  transform: none;
+  margin-top: 4px;
+}
