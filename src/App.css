@@ -1952,19 +1952,6 @@ html, body, #root {
   filter: drop-shadow(0 0 12px hsla(265, 50%, 65%, 0.25));
 }
 
-/* Launch-at-login toggle on the consent slide. */
-.onboarding-login-toggle {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 16px;
-}
-.onboarding-login-label {
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.75);
-  font-family: "Poppins", sans-serif;
-}
-
 /* Consent slide: stacked primary + secondary buttons. */
 .onboarding-consent-actions {
   display: flex;

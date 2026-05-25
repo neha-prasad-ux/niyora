@@ -34,6 +34,7 @@ const SLIDES: Slide[] = [
       "We notify you when you need calm",
       "Breathing and mindful practices, combined",
       "Every practice under 60 seconds",
+      "Launches with your Mac so it's there when you need it",
     ],
   },
   {
@@ -49,7 +50,6 @@ const SLIDE_DURATION_MS = 3800;
 export default function Onboarding({ onDone }: Props) {
   const [index, setIndex] = useState(0);
   const [finishing, setFinishing] = useState(false);
-  const [launchAtLogin, setLaunchAtLogin] = useState(true);
 
   // The first slide (value-prop with the bullet list) waits for a click .
   // it has the most to read and shouldn't disappear on people. Subsequent
@@ -72,11 +72,6 @@ export default function Onboarding({ onDone }: Props) {
       await invoke("set_analytics_consent", { granted: analyticsConsent });
     } catch {
       /* ignore. defaults to no consent, app still works */
-    }
-    try {
-      await invoke("set_launch_at_login", { enabled: launchAtLogin });
-    } catch {
-      /* ignore. defaults to on, app still works */
     }
     // Trigger the macOS notification permission popup. Fire-and-forget.
     try {
@@ -177,21 +172,6 @@ export default function Onboarding({ onDone }: Props) {
             </ul>
           )}
         </div>
-
-        {/* Launch-at-login toggle on the consent slide */}
-        {isConsent && (
-          <div className="onboarding-login-toggle">
-            <label className="soul-switch" aria-label="Toggle launch at login">
-              <input
-                type="checkbox"
-                checked={launchAtLogin}
-                onChange={(e) => setLaunchAtLogin(e.target.checked)}
-              />
-              <span className="soul-switch-track" />
-            </label>
-            <span className="onboarding-login-label">Launch at login</span>
-          </div>
-        )}
 
         {/* Bottom: consent slide gets two explicit buttons, every other
             slide gets a single Continue button. */}

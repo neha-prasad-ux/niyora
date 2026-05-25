@@ -122,7 +122,11 @@ export default function Settings({ onBack, onOpenPss4 }: Props) {
   const toggleLaunchAtLogin = (next: boolean) => {
     setLaunchAtLogin(next);
     invoke("set_launch_at_login", { enabled: next }).catch(() => {
-      setLaunchAtLogin(!next);
+      // Re-fetch the truth from the backend rather than assuming the prior
+      // value. Avoids UI drift if the backend partially applied the change.
+      invoke<boolean>("get_launch_at_login")
+        .then(setLaunchAtLogin)
+        .catch(() => setLaunchAtLogin(!next));
     });
   };
 

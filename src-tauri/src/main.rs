@@ -108,11 +108,10 @@ fn get_launch_at_login() -> bool {
 }
 
 /// Updates the launch-at-login preference and syncs the OS registration.
+/// OS registration is attempted FIRST. Config is only persisted on success so
+/// the saved preference never diverges from the actual OS state.
 #[tauri::command]
 fn set_launch_at_login(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
-    let mut cfg = config::load();
-    cfg.launch_at_login = enabled;
-    config::save(&cfg)?;
     #[cfg(target_os = "macos")]
     {
         use tauri_plugin_autostart::ManagerExt;
@@ -125,6 +124,9 @@ fn set_launch_at_login(app: tauri::AppHandle, enabled: bool) -> Result<(), Strin
     }
     #[cfg(not(target_os = "macos"))]
     let _ = app;
+    let mut cfg = config::load();
+    cfg.launch_at_login = enabled;
+    config::save(&cfg)?;
     Ok(())
 }
 
@@ -377,17 +379,27 @@ fn main() {
 
             // Sync macOS Login Item registration with the persisted preference.
             // Runs on every launch so the registration self-heals if the user
-            // deletes the LaunchAgent plist or upgrades the app.
+            // deletes the LaunchAgent plist or upgrades the app. Errors are
+            // logged so persistent registration failures (permissions, corrupt
+            // LaunchAgents dir) surface in stderr rather than vanishing.
             #[cfg(target_os = "macos")]
             {
                 use tauri_plugin_autostart::ManagerExt;
                 let mgr = app.handle().autolaunch();
                 let want = config::load().launch_at_login;
-                let have = mgr.is_enabled().unwrap_or(false);
-                if want && !have {
-                    let _ = mgr.enable();
-                } else if !want && have {
-                    let _ = mgr.disable();
+                match mgr.is_enabled() {
+                    Ok(have) => {
+                        if want && !have {
+                            if let Err(e) = mgr.enable() {
+                                eprintln!("[autostart] enable failed: {e}");
+                            }
+                        } else if !want && have {
+                            if let Err(e) = mgr.disable() {
+                                eprintln!("[autostart] disable failed: {e}");
+                            }
+                        }
+                    }
+                    Err(e) => eprintln!("[autostart] is_enabled failed: {e}"),
                 }
             }
 
