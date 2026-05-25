@@ -277,10 +277,13 @@ impl CompanionSync {
             let inner = self.inner.lock().await;
             (inner.server_id.clone(), inner.server_name.clone())
         };
+        // Echo the negotiated peer protocol back to the client rather than
+        // PROTOCOL_VERSION. v2 companions that check exact equality on the
+        // Hello will otherwise reject every connection after we ship v3.
         write_message(
             &mut write_half,
             &ServerMessage::Hello {
-                protocol: PROTOCOL_VERSION,
+                protocol: peer_protocol,
                 server_id,
                 server_name,
             },
@@ -463,7 +466,9 @@ impl CompanionSync {
                                 }
                                 Ok(ClientMessage::SessionRecorded {
                                     technique_name,
+                                    technique_kind,
                                     duration_sec,
+                                    intended_duration_sec,
                                     completed,
                                     recorded_at,
                                 }) => {
@@ -472,12 +477,16 @@ impl CompanionSync {
                                         incoming.clear();
                                         continue;
                                     }
+                                    let intended = intended_duration_sec.unwrap_or(duration_sec);
                                     eprintln!(
                                         "[companion_sync] session_recorded technique={technique_name} \
-                                         duration={duration_sec}s completed={completed} at={recorded_at}"
+                                         kind={technique_kind} intended={intended}s actual={duration_sec}s \
+                                         completed={completed} at={recorded_at}"
                                     );
                                     if let Err(e) = crate::sessions::record_companion_session(
                                         &technique_name,
+                                        &technique_kind,
+                                        intended,
                                         duration_sec,
                                         completed,
                                         &recorded_at,

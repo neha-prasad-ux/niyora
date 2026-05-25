@@ -102,15 +102,23 @@ pub fn record_session(
 }
 
 /// Record a session reported by the iOS companion over the v3 protocol.
-/// The companion supplies technique_name, duration, completed, and the
-/// ISO 8601 timestamp from the phone. A new session_id is minted here
-/// because the phone does not share the Mac's UUID namespace.
+/// The companion supplies technique_name, technique_kind, both durations,
+/// completed, and the ISO 8601 timestamp from the phone. A new session_id
+/// is minted here because the phone does not share the Mac's UUID
+/// namespace. Unknown technique_kind values are rejected so the session
+/// log keeps a stable schema.
 pub fn record_companion_session(
     technique_name: &str,
-    duration_sec: u64,
+    technique_kind: &str,
+    intended_duration_sec: u64,
+    actual_duration_sec: u64,
     completed: bool,
     recorded_at: &str,
 ) -> Result<(), String> {
+    match technique_kind {
+        "breathing" | "mindfulness" => {}
+        _ => return Err(format!("unknown technique_kind: {technique_kind}")),
+    }
     let path = sessions_path().ok_or_else(|| "Could not resolve sessions path".to_string())?;
     let session_id = uuid::Uuid::new_v4().to_string();
     append_session_line(
@@ -118,9 +126,9 @@ pub fn record_companion_session(
         &session_id,
         recorded_at,
         technique_name,
-        "breathing",
-        duration_sec,
-        duration_sec,
+        technique_kind,
+        intended_duration_sec,
+        actual_duration_sec,
         completed,
     )
 }

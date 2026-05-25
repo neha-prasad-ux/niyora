@@ -47,6 +47,10 @@ pub const PROTOCOL_VERSION: u32 = 3;
 /// still send HRV results but cannot use session sync.
 pub const PROTOCOL_VERSION_MIN: u32 = 2;
 
+fn default_technique_kind() -> String {
+    "breathing".to_string()
+}
+
 /// A message from the phone to the Mac.
 /// `Eq` is not derived because `HrvResult` carries `f64` fields, which do
 /// not implement `Eq` (NaN != NaN). All call sites use `assert_eq!` /
@@ -68,12 +72,25 @@ pub enum ClientMessage {
     /// case hex of `HMAC-SHA256(secret_bytes, nonce_bytes)` where the nonce
     /// is decoded from the hex string the server sent.
     Auth { hmac_hex: String },
-    /// A completed breathing session from the iOS companion (v3+). The Mac
-    /// persists this to the session log and bumps Soul tier progression.
-    /// v2 companions never send this.
+    /// A completed (or abandoned) session from the iOS companion (v3+).
+    /// The Mac persists this to the session log and bumps Soul tier
+    /// progression. v2 companions never send this.
     SessionRecorded {
         technique_name: String,
+        /// `"breathing"` or `"mindfulness"`. Defaults to `"breathing"` for
+        /// early v3 companion builds that predate this field; later builds
+        /// must send the real kind so mindfulness sessions are logged
+        /// correctly.
+        #[serde(default = "default_technique_kind")]
+        technique_kind: String,
+        /// How long the session actually ran. Always present.
         duration_sec: u64,
+        /// How long the session was meant to run. Distinct from
+        /// `duration_sec` when `completed` is false (the user abandoned
+        /// early). Optional for forward compat: when absent, the Mac
+        /// assumes intended == actual.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        intended_duration_sec: Option<u64>,
         completed: bool,
         /// ISO 8601 timestamp of when the session was recorded on the phone.
         recorded_at: String,
@@ -344,7 +361,9 @@ mod tests {
     fn session_recorded_serializes_with_type_tag() {
         let m = ClientMessage::SessionRecorded {
             technique_name: "Ujjayi".into(),
+            technique_kind: "breathing".into(),
             duration_sec: 64,
+            intended_duration_sec: Some(64),
             completed: true,
             recorded_at: "2026-05-24T12:00:00Z".into(),
         };
@@ -352,7 +371,9 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&s).unwrap();
         assert_eq!(v["type"], "session_recorded");
         assert_eq!(v["technique_name"], "Ujjayi");
+        assert_eq!(v["technique_kind"], "breathing");
         assert_eq!(v["duration_sec"], 64);
+        assert_eq!(v["intended_duration_sec"], 64);
         assert_eq!(v["completed"], true);
         assert_eq!(v["recorded_at"], "2026-05-24T12:00:00Z");
     }
@@ -360,14 +381,33 @@ mod tests {
     #[test]
     fn session_recorded_round_trips() {
         let m = ClientMessage::SessionRecorded {
-            technique_name: "Box Breathing".into(),
-            duration_sec: 120,
+            technique_name: "Trataka".into(),
+            technique_kind: "mindfulness".into(),
+            duration_sec: 8,
+            intended_duration_sec: Some(60),
             completed: false,
             recorded_at: "2026-05-24T12:30:00Z".into(),
         };
         let s = serde_json::to_string(&m).unwrap();
         let back: ClientMessage = serde_json::from_str(&s).unwrap();
         assert_eq!(m, back);
+    }
+
+    #[test]
+    fn session_recorded_back_compat_defaults() {
+        // Early v3 companion builds may not yet send technique_kind or
+        // intended_duration_sec. The Mac must still deserialize their
+        // payload, defaulting kind to "breathing" and treating intended
+        // as absent.
+        let raw = r#"{"type":"session_recorded","technique_name":"Box","duration_sec":60,"completed":true,"recorded_at":"2026-05-24T12:00:00Z"}"#;
+        let back: ClientMessage = serde_json::from_str(raw).unwrap();
+        match back {
+            ClientMessage::SessionRecorded { technique_kind, intended_duration_sec, .. } => {
+                assert_eq!(technique_kind, "breathing");
+                assert_eq!(intended_duration_sec, None);
+            }
+            other => panic!("expected SessionRecorded, got {other:?}"),
+        }
     }
 
     #[test]
