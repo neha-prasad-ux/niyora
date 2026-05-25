@@ -37,3 +37,21 @@ jobs:
           workspaces: src-tauri
 
       - run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets
+
+  tier-colors-sync:
+    name: Verify tier-colors.json in sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run generate:tier-colors
+      - run: git diff --exit-code public/tier-colors.json || (echo "Error: public/tier-colors.json is out of sync. Run: pnpm run generate:tier-colors" && exit 1)

@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "canonical_source": "src/tiers.ts",
+  "note": "These HSL values MUST be mirrored in niyora-web (OrbStage.astro) and niyora-companion (Techniques.swift)",
+  "colors": {
+    "spark": {
+      "hue": 30,
+      "saturation": 70,
+      "lightness": 60
+    },
+    "glow": {
+      "hue": 335,
+      "saturation": 70,
+      "lightness": 60
+    },
+    "shine": {
+      "hue": 280,
+      "saturation": 65,
+      "lightness": 60
+    },
+    "radiance": {
+      "hue": 230,
+      "saturation": 65,
+      "lightness": 60
+    },
+    "brilliance": {
+      "hue": 210,
+      "saturation": 60,
+      "lightness": 60
+    }
+  }
+}
