@@ -54,4 +54,4 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm run generate:tier-colors
-      - run: git diff --exit-code public/tier-colors.json
+      - run: git diff --exit-code public/tier-colors.json || (echo "Error: public/tier-colors.json is out of sync. Run: pnpm run generate:tier-colors" && exit 1)
