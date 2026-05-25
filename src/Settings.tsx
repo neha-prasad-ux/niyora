@@ -4,7 +4,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useSnapshot, scoreToBallGradient } from "./useSnapshot";
 import { useSessionStats } from "./useSessionStats";
-import { TIERS, currentTier, nextTier, sessionsToNext, type Tier } from "./tiers";
+import { TIERS, currentTier, nextTier, sessionsToNext, tierHue, type Tier } from "./tiers";
 import { CompanionCard } from "./CompanionCard";
 
 interface Props {
@@ -23,17 +23,6 @@ const LABEL_TEXT: Record<string, string> = {
   dense: "Dense",
   heavy: "Heavy",
 };
-
-/** Hue accent per tier — warm → cool as the soul brightens. */
-function tierAccentHue(tier: Tier): number {
-  switch (tier.id) {
-    case "spark":      return 30;
-    case "glow":       return 335;
-    case "shine":      return 280;
-    case "radiance":   return 230;
-    case "brilliance": return 210;
-  }
-}
 
 /** Number of Saturn-style rings to render for a tier. */
 function tierRingCount(tier: Tier): number {
@@ -169,7 +158,7 @@ export default function Settings({ onBack, onOpenPss4 }: Props) {
   const tier = currentTier(completed);
   const next = nextTier(tier);
   const remaining = sessionsToNext(completed);
-  const accentHue = tierAccentHue(tier);
+  const accentHue = tierHue(tier);
   const rings = tierRingCount(tier);
 
   const stressLine = `Today: ${LABEL_TEXT[label] ?? label}`;
