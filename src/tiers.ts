@@ -34,9 +34,15 @@ export interface Tier {
 export interface TierColor {
   /** Hue (0-360). */
   hue: number;
-  /** Saturation (0-100%). */
+  /**
+   * Saturation (0-100%). Advisory for external consumers (tier-colors.json).
+   * Not yet consumed by app CSS; only hue is used via tierHue().
+   */
   saturation: number;
-  /** Base lightness reference (0-100%). Actual usage may vary by context. */
+  /**
+   * Lightness (0-100%). Advisory for external consumers (tier-colors.json).
+   * Not yet consumed by app CSS; only hue is used via tierHue().
+   */
   lightness: number;
 }
 
@@ -70,7 +76,11 @@ export function tierById(id: Tier["id"]): Tier {
   return t;
 }
 
-/** Get the HSL color for a tier. */
+/**
+ * Get the full HSL color for a tier.
+ * Exported for external tooling and future use. Not yet called within this app;
+ * app CSS currently uses only hue via tierHue().
+ */
 export function tierColor(tier: Tier): TierColor {
   return TIER_COLORS[tier.id];
 }
