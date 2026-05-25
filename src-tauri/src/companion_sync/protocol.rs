@@ -1,4 +1,4 @@
-//! Wire protocol v2 between the Niyora Mac app and the Niyora Companion
+//! Wire protocol v3 between the Niyora Mac app and the Niyora Companion
 //! iPhone app. Each frame is one line of JSON over TCP (NDJSON). Every
 //! message carries a `type` discriminator. Unknown types are a fatal error
 //! and the connection is dropped, on the principle that a misaligned client
@@ -12,7 +12,9 @@
 //!   ←  challenge            {nonce_hex}
 //!   →  auth                 {hmac_hex}                  // HMAC-SHA256(secret, nonce)
 //!   ←  authed   or   ← auth_failed (then close)
+//!   ←  status_update        {soul_tier, completed_sessions}   (after authed)
 //!   ←  request_measurement  {session_id, phase, technique_name}   (zero or more per session)
+//!   →  session_recorded     {technique_name, duration_sec, completed, recorded_at}   (v3 only)
 //! ```
 //!
 //! `pairing_id` is only set on the first connect after a QR scan. The Mac
@@ -26,14 +28,28 @@
 //! and the Mac emits one `request_measurement` per tap (phase = pre or
 //! post). The phone responds with `hrv_result` once it has computed RMSSD
 //! and SDNN from the green-channel pulse it captured.
+//!
+//! v3 vs v2: adds `session_recorded` (phone -> Mac) so the iOS companion
+//! can report completed breathing sessions for Soul tier progression.
+//! Also adds `status_update` (Mac -> phone) so paired mode can show the
+//! Mac's current Soul tier. v2 companions still connect and use HRV, but
+//! cannot send `session_recorded` or receive `status_update`.
 
 use serde::{Deserialize, Serialize};
 
 /// Wire-format protocol version. Bumped on any breaking shape change
-/// (renamed field, removed field, changed semantic). v2 dropped the
-/// HealthKit auto-read path and rewrote `HrvResult` around a single
-/// per-phase measurement.
-pub const PROTOCOL_VERSION: u32 = 2;
+/// (renamed field, removed field, changed semantic). v3 adds
+/// `SessionRecorded` (phone -> Mac) and `StatusUpdate` (Mac -> phone).
+/// v2 companions are still accepted for HRV-only use.
+pub const PROTOCOL_VERSION: u32 = 3;
+
+/// Minimum protocol version accepted from companions. v2 clients can
+/// still send HRV results but cannot use session sync.
+pub const PROTOCOL_VERSION_MIN: u32 = 2;
+
+fn default_technique_kind() -> String {
+    "breathing".to_string()
+}
 
 /// A message from the phone to the Mac.
 /// `Eq` is not derived because `HrvResult` carries `f64` fields, which do
@@ -56,6 +72,29 @@ pub enum ClientMessage {
     /// case hex of `HMAC-SHA256(secret_bytes, nonce_bytes)` where the nonce
     /// is decoded from the hex string the server sent.
     Auth { hmac_hex: String },
+    /// A completed (or abandoned) session from the iOS companion (v3+).
+    /// The Mac persists this to the session log and bumps Soul tier
+    /// progression. v2 companions never send this.
+    SessionRecorded {
+        technique_name: String,
+        /// `"breathing"` or `"mindfulness"`. Defaults to `"breathing"` for
+        /// early v3 companion builds that predate this field; later builds
+        /// must send the real kind so mindfulness sessions are logged
+        /// correctly.
+        #[serde(default = "default_technique_kind")]
+        technique_kind: String,
+        /// How long the session actually ran. Always present.
+        duration_sec: u64,
+        /// How long the session was meant to run. Distinct from
+        /// `duration_sec` when `completed` is false (the user abandoned
+        /// early). Optional for forward compat: when absent, the Mac
+        /// assumes intended == actual.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        intended_duration_sec: Option<u64>,
+        completed: bool,
+        /// ISO 8601 timestamp of when the session was recorded on the phone.
+        recorded_at: String,
+    },
     /// One PPG measurement the phone captured for a session. The Mac merges
     /// pre and post frames sharing the same `session_id` into one history
     /// row. Status reports the capture quality honestly · the spec's
@@ -110,6 +149,13 @@ pub enum ServerMessage {
     Authed,
     /// Auth failed. Connection will close after this frame.
     AuthFailed { reason: String },
+    /// Mac's current Soul tier and session count, sent after auth and
+    /// after each session_recorded so paired mode can display Mac-side
+    /// state. v3+ only.
+    StatusUpdate {
+        soul_tier: String,
+        completed_sessions: u32,
+    },
     /// Tells the phone to start a 30s PPG capture for one side of a
     /// session. The Mac emits these only when the user taps "Measure
     /// stress" on the pre-session info screen or the post-session mood
@@ -209,6 +255,10 @@ mod tests {
             ServerMessage::AuthFailed {
                 reason: "bad hmac".into(),
             },
+            ServerMessage::StatusUpdate {
+                soul_tier: "glow".into(),
+                completed_sessions: 7,
+            },
             ServerMessage::RequestMeasurement {
                 session_id: "sess-1".into(),
                 phase: "pre".into(),
@@ -305,6 +355,72 @@ mod tests {
         let s = serde_json::to_string(&m).unwrap();
         let back: ClientMessage = serde_json::from_str(&s).unwrap();
         assert_eq!(m, back);
+    }
+
+    #[test]
+    fn session_recorded_serializes_with_type_tag() {
+        let m = ClientMessage::SessionRecorded {
+            technique_name: "Ujjayi".into(),
+            technique_kind: "breathing".into(),
+            duration_sec: 64,
+            intended_duration_sec: Some(64),
+            completed: true,
+            recorded_at: "2026-05-24T12:00:00Z".into(),
+        };
+        let s = serde_json::to_string(&m).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(v["type"], "session_recorded");
+        assert_eq!(v["technique_name"], "Ujjayi");
+        assert_eq!(v["technique_kind"], "breathing");
+        assert_eq!(v["duration_sec"], 64);
+        assert_eq!(v["intended_duration_sec"], 64);
+        assert_eq!(v["completed"], true);
+        assert_eq!(v["recorded_at"], "2026-05-24T12:00:00Z");
+    }
+
+    #[test]
+    fn session_recorded_round_trips() {
+        let m = ClientMessage::SessionRecorded {
+            technique_name: "Trataka".into(),
+            technique_kind: "mindfulness".into(),
+            duration_sec: 8,
+            intended_duration_sec: Some(60),
+            completed: false,
+            recorded_at: "2026-05-24T12:30:00Z".into(),
+        };
+        let s = serde_json::to_string(&m).unwrap();
+        let back: ClientMessage = serde_json::from_str(&s).unwrap();
+        assert_eq!(m, back);
+    }
+
+    #[test]
+    fn session_recorded_back_compat_defaults() {
+        // Early v3 companion builds may not yet send technique_kind or
+        // intended_duration_sec. The Mac must still deserialize their
+        // payload, defaulting kind to "breathing" and treating intended
+        // as absent.
+        let raw = r#"{"type":"session_recorded","technique_name":"Box","duration_sec":60,"completed":true,"recorded_at":"2026-05-24T12:00:00Z"}"#;
+        let back: ClientMessage = serde_json::from_str(raw).unwrap();
+        match back {
+            ClientMessage::SessionRecorded { technique_kind, intended_duration_sec, .. } => {
+                assert_eq!(technique_kind, "breathing");
+                assert_eq!(intended_duration_sec, None);
+            }
+            other => panic!("expected SessionRecorded, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn status_update_serializes_with_type_tag() {
+        let m = ServerMessage::StatusUpdate {
+            soul_tier: "radiance".into(),
+            completed_sessions: 42,
+        };
+        let s = serde_json::to_string(&m).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(v["type"], "status_update");
+        assert_eq!(v["soul_tier"], "radiance");
+        assert_eq!(v["completed_sessions"], 42);
     }
 
     #[test]
