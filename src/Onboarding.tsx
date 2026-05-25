@@ -14,9 +14,6 @@ interface Slide {
    * advancing. Defaults to SLIDE_DURATION_MS. Bullet-heavy slides need
    * more time so the user can actually read them. */
   durationMs?: number;
-  /** "consent" renders the analytics opt-in slide: a detail panel plus two
-   * explicit buttons instead of click-anywhere-to-advance. */
-  kind?: "consent";
   /** Bold heading line at the top of the note panel. */
   noteHead?: string;
   /** Secondary detail text, rendered in a panel below the body. */
@@ -37,10 +34,9 @@ const SLIDES: Slide[] = [
     ],
   },
   {
-    kind: "consent",
     title: "Private by design",
-    noteHead: "Built independently, shaped by you.",
-    note: "Anonymous usage tells us what to make better next.\n\nStress scores, breath patterns, anything that identifies you. None of it leaves your Mac.\n\nNiyora launches with your Mac so it's there when you need it.",
+    noteHead: "Your data stays local.",
+    note: "Stress scores, breath patterns, anything that identifies you. None of it leaves your Mac.\n\nNiyora launches with your Mac so it's there when you need it.",
   },
 ];
 
@@ -50,10 +46,10 @@ export default function Onboarding({ onDone }: Props) {
   const [index, setIndex] = useState(0);
   const [finishing, setFinishing] = useState(false);
 
-  // The first slide (value-prop with the bullet list) waits for a click .
-  // it has the most to read and shouldn't disappear on people. Subsequent
-  // slides auto-advance gently. The last slide always stops so the user
-  // can answer the consent prompt at their own pace.
+  // The first slide (value-prop with the bullet list) waits for a click.
+  // It has the most to read and shouldn't disappear on people. Subsequent
+  // slides auto-advance gently. The last slide also waits for a click to
+  // finish onboarding.
   useEffect(() => {
     if (index === 0) return;
     if (index >= SLIDES.length - 1) return;
@@ -87,18 +83,19 @@ export default function Onboarding({ onDone }: Props) {
   };
 
   const slide = SLIDES[index];
-  const isConsent = slide.kind === "consent";
 
-  // Click anywhere advances to the next slide. The consent slide is the
-  // exception: it waits for an explicit button choice and ignores background
-  // clicks so the user cannot skip the decision by tapping.
+  // Click anywhere advances to the next slide.
   const handleScreenClick = () => {
-    if (finishing || isConsent) return;
-    setIndex((i) => i + 1);
+    if (finishing) return;
+    if (index >= SLIDES.length - 1) {
+      finish(false);
+    } else {
+      setIndex((i) => i + 1);
+    }
   };
 
   return (
-    <div className="niyora-onboarding" onClick={handleScreenClick} style={{ cursor: isConsent ? "default" : "pointer" }}>
+    <div className="niyora-onboarding" onClick={handleScreenClick} style={{ cursor: "pointer" }}>
       <div className="onboarding-backdrop" />
       {/* "I live here" pointer . shown only on the first slide so users can
           see where to find Niyora later, without distracting once they're in. */}
@@ -128,19 +125,12 @@ export default function Onboarding({ onDone }: Props) {
         {/* Middle: the slide content. Keyed on index so React re-mounts
             and the fade-in animation re-plays each transition. */}
         <div key={index} className="onboarding-slide">
-          {isConsent ? (
-            <svg className="onboarding-lock-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <rect x="4" y="11" width="16" height="10" rx="2" />
-              <path d="M8 11 V7 a4 4 0 0 1 8 0 V11" />
-            </svg>
-          ) : (
-            <img
-              src="/icons/niyora-logo.png"
-              alt="Niyora"
-              className="onboarding-logo"
-              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-            />
-          )}
+          <img
+            src="/icons/niyora-logo.png"
+            alt="Niyora"
+            className="onboarding-logo"
+            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+          />
           {slide.eyebrow && (
             <div className="onboarding-eyebrow">{slide.eyebrow}</div>
           )}
@@ -172,34 +162,22 @@ export default function Onboarding({ onDone }: Props) {
           )}
         </div>
 
-        {/* Bottom: consent slide gets two explicit buttons, every other
-            slide gets a single Continue button. */}
-        {isConsent ? (
-          <div className="onboarding-consent-actions">
-            <button
-              className="onboarding-btn"
-              onClick={(e) => { e.stopPropagation(); finish(true); }}
-              disabled={finishing}
-            >
-              {finishing ? "Welcome…" : "Share anonymous analytics"}
-            </button>
-            <button
-              className="onboarding-btn onboarding-btn-secondary"
-              onClick={(e) => { e.stopPropagation(); finish(false); }}
-              disabled={finishing}
-            >
-              Continue without analytics
-            </button>
-          </div>
-        ) : (
-          <button
-            className="onboarding-btn"
-            onClick={(e) => { e.stopPropagation(); setIndex((i) => i + 1); }}
-            disabled={finishing}
-          >
-            Continue
-          </button>
-        )}
+        {/* Bottom: single Continue button that finishes onboarding
+            when on the last slide. */}
+        <button
+          className="onboarding-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (index >= SLIDES.length - 1) {
+              finish(false);
+            } else {
+              setIndex((i) => i + 1);
+            }
+          }}
+          disabled={finishing}
+        >
+          {finishing ? "Welcome…" : "Continue"}
+        </button>
       </div>
     </div>
   );
