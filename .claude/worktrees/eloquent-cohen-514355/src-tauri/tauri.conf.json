@@ -1,0 +1,62 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Niyora",
+  "version": "0.2.0",
+  "identifier": "com.niyora.breathing",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Niyora",
+        "width": 420,
+        "height": 520,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "visible": false,
+        "fullscreen": false,
+        "alwaysOnTop": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "createUpdaterArtifacts": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "10.15",
+      "signingIdentity": "Developer ID Application: Neha Neha (865S8DL9Y9)",
+      "dmg": {
+        "background": "dmg/background.tiff",
+        "windowSize": { "width": 660, "height": 400 },
+        "appPosition": { "x": 330, "y": 200 },
+        "applicationFolderPosition": { "x": 1200, "y": 200 }
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://downloads.niyora.com/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJEQjVFREQ4RjU1OTQ5RjMKUldUelNWbjEyTzIxTFo4cTFxUk44OEY2MzladmxyYXIwUFNzbnlFdzZKVHdGMVBNaTMxbEsyam4K"
+    }
+  }
+}

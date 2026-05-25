@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Niyora</title>
+    <style>
+      /* Hide everything until React has mounted and painted, so the user
+         never sees raw HTML or unstyled content during launch. main.tsx
+         flips this to visible on the first frame after render. */
+      html { visibility: hidden; background: transparent; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,34 @@
+[package]
+name = "niyora"
+version = "0.2.0"
+description = "A macOS menu bar breathing exercise app"
+authors = ["Neha Prasad"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# `macos-private-api` stays in the base feature set (not target-conditional):
+# tauri-build validates Cargo.toml's [dependencies] against tauri.conf.json's
+# `macOSPrivateApi: true` flag and does not see features unioned in from a
+# target-conditional block. The feature is a no-op on non-macOS targets, it
+# only gates internal API surface.
+tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
+tauri-plugin-positioner = { version = "2", features = ["tray-icon"] }
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-updater = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = "0.4"
+dirs = "6"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2" }
+cocoa = "0.26"
+objc = "0.2"
+mac-notification-sys = "0.6"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]

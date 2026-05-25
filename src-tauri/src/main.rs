@@ -294,6 +294,8 @@ fn main() {
             onboarding::request_notification_permission,
             telemetry::analytics_consent_status,
             telemetry::set_analytics_consent,
+            config::get_preferred_track,
+            config::set_preferred_track,
             get_launch_at_login,
             set_launch_at_login,
             #[cfg(target_os = "macos")]

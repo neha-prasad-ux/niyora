@@ -46,6 +46,10 @@ pub struct NiyoraConfig {
     /// user opts in. Never tied to any personal information.
     #[serde(default)]
     pub analytics_id: Option<String>,
+    /// Preferred ambient track for breathing sessions: "serene", "ocean",
+    /// "forest", or "random". None treated as "random".
+    #[serde(default)]
+    pub preferred_track: Option<String>,
 }
 
 impl Default for NiyoraConfig {
@@ -58,6 +62,7 @@ impl Default for NiyoraConfig {
             launch_at_login: true,
             analytics_consent: None,
             analytics_id: None,
+            preferred_track: None,
         }
     }
 }
@@ -76,4 +81,24 @@ pub fn save(cfg: &NiyoraConfig) -> Result<(), String> {
     let path = config_path().ok_or_else(|| "Could not resolve config directory".to_string())?;
     let json = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
     std::fs::write(&path, json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_preferred_track() -> String {
+    load().preferred_track.unwrap_or_else(|| "random".to_string())
+}
+
+/// Allowed values for the preferred track. Anything else is rejected so the
+/// config file does not become a junk drawer of arbitrary IPC strings.
+/// Kept in sync with `AMBIENT_TRACKS` / `resolveTrack` in BreathingSession.tsx.
+const ALLOWED_TRACKS: &[&str] = &["random", "serene", "ocean", "forest"];
+
+#[tauri::command]
+pub fn set_preferred_track(track: String) -> Result<(), String> {
+    if !ALLOWED_TRACKS.contains(&track.as_str()) {
+        return Err(format!("unknown track: {track}"));
+    }
+    let mut cfg = load();
+    cfg.preferred_track = Some(track);
+    save(&cfg)
 }

@@ -1,0 +1,307 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.1.0). Leave empty to use the current commit SHA."
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, sign, notarize (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Apple Silicon
+            runner: macos-latest
+            target: aarch64-apple-darwin
+            arch: aarch64
+            suffix: AppleSilicon
+            updater_platform: darwin-aarch64
+          - name: Intel
+            runner: macos-latest
+            target: x86_64-apple-darwin
+            arch: x86_64
+            suffix: Intel
+            updater_platform: darwin-x86_64
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Import Developer ID cert into temp keychain
+        env:
+          P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.APPLE_CERT_P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -eo pipefail
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          P12_PATH="$RUNNER_TEMP/cert.p12"
+
+          echo "$P12_BASE64" | base64 --decode > "$P12_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          security import "$P12_PATH" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$P12_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security \
+            -T /usr/bin/productsign
+
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Make this keychain the default search list (login still searchable for Apple roots)
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+
+          security find-identity -v -p codesigning
+
+          rm -f "$P12_PATH"
+
+      - name: Build, sign, and notarize (Tauri bundler)
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # Tauri updater signing key — produces .app.tar.gz.sig alongside the bundle
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm tauri build --target ${{ matrix.target }}
+
+      - name: Verify signatures and notarization
+        run: |
+          APP="src-tauri/target/${{ matrix.target }}/release/bundle/macos/Niyora.app"
+          DMG_DIR="src-tauri/target/${{ matrix.target }}/release/bundle/dmg"
+
+          echo "=== App signature ==="
+          codesign -dv --verbose=4 "$APP" 2>&1 | head -20
+          echo "=== Notarization staple on .app ==="
+          xcrun stapler validate "$APP" || echo "(app not stapled, may be stapled to dmg only)"
+          echo "=== DMG list ==="
+          ls -la "$DMG_DIR"
+          echo "=== Notarization staple on .dmg ==="
+          for d in "$DMG_DIR"/*.dmg; do
+            xcrun stapler validate "$d" || true
+          done
+          echo "=== Gatekeeper assessment ==="
+          spctl -a -t open --context context:primary-signature -v "$DMG_DIR"/*.dmg || true
+          echo "=== Updater bundle ==="
+          ls -la src-tauri/target/${{ matrix.target }}/release/bundle/macos/
+
+      - name: Stage canonically named release files
+        id: stage
+        run: |
+          set -eo pipefail
+          DMG_DIR="src-tauri/target/${{ matrix.target }}/release/bundle/dmg"
+          MACOS_DIR="src-tauri/target/${{ matrix.target }}/release/bundle/macos"
+          REF="${GITHUB_REF_NAME#v}"
+          [ -z "$REF" ] && REF="$(git rev-parse --short HEAD)"
+
+          STAGED="release-files"
+          mkdir -p "$STAGED"
+
+          # DMG
+          DMG_SRC=$(find "$DMG_DIR" -maxdepth 1 -name '*.dmg' | head -1)
+          DMG_DEST="$STAGED/Niyora-${REF}-${{ matrix.suffix }}.dmg"
+          cp "$DMG_SRC" "$DMG_DEST"
+
+          # Updater bundle (.app.tar.gz) and detached signature (.sig)
+          TGZ_SRC=$(find "$MACOS_DIR" -maxdepth 1 -name '*.app.tar.gz' | head -1)
+          SIG_SRC=$(find "$MACOS_DIR" -maxdepth 1 -name '*.app.tar.gz.sig' | head -1)
+          TGZ_DEST="$STAGED/Niyora-${REF}-${{ matrix.suffix }}.app.tar.gz"
+          SIG_DEST="$STAGED/Niyora-${REF}-${{ matrix.suffix }}.app.tar.gz.sig"
+          cp "$TGZ_SRC" "$TGZ_DEST"
+          cp "$SIG_SRC" "$SIG_DEST"
+
+          {
+            echo "version=$REF"
+            echo "dmg=$(basename "$DMG_DEST")"
+            echo "tgz=$(basename "$TGZ_DEST")"
+            echo "sig=$(basename "$SIG_DEST")"
+            echo "tgz_path=$TGZ_DEST"
+            echo "sig_path=$SIG_DEST"
+            echo "platform=${{ matrix.updater_platform }}"
+          } >> "$GITHUB_OUTPUT"
+
+          ls -la "$STAGED"
+
+      - name: Install wrangler
+        run: npm install -g wrangler
+
+      - name: Upload signed DMG and updater bundle to Cloudflare R2
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -eo pipefail
+          BUCKET="niyora-downloads"
+          DMG="release-files/${{ steps.stage.outputs.dmg }}"
+          TGZ="release-files/${{ steps.stage.outputs.tgz }}"
+          SIG="release-files/${{ steps.stage.outputs.sig }}"
+
+          wrangler r2 object put "$BUCKET/${{ steps.stage.outputs.dmg }}" \
+            --file "$DMG" \
+            --content-type "application/x-apple-diskimage" \
+            --remote
+
+          wrangler r2 object put "$BUCKET/${{ steps.stage.outputs.tgz }}" \
+            --file "$TGZ" \
+            --content-type "application/gzip" \
+            --remote
+
+          wrangler r2 object put "$BUCKET/${{ steps.stage.outputs.sig }}" \
+            --file "$SIG" \
+            --content-type "text/plain" \
+            --remote
+
+      - name: Emit per-arch updater metadata for the publish job
+        run: |
+          set -eo pipefail
+          mkdir -p updater-meta
+          cat > "updater-meta/${{ matrix.updater_platform }}.json" <<EOF
+          {
+            "platform": "${{ steps.stage.outputs.platform }}",
+            "version": "${{ steps.stage.outputs.version }}",
+            "tgz": "${{ steps.stage.outputs.tgz }}",
+            "sig_file": "${{ steps.stage.outputs.sig }}",
+            "signature_inline": "$(cat "${{ steps.stage.outputs.sig_path }}" | tr -d '\n' | sed 's/"/\\"/g')"
+          }
+          EOF
+          cat "updater-meta/${{ matrix.updater_platform }}.json"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: niyora-${{ matrix.arch }}
+          path: |
+            release-files/*.dmg
+            release-files/*.app.tar.gz
+            release-files/*.app.tar.gz.sig
+            updater-meta/*.json
+          if-no-files-found: error
+
+      - name: Clean up keychain
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/build.keychain-db" || true
+
+  publish:
+    name: Publish GitHub Release + latest.json
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect DMGs and updater files
+        run: |
+          set -eo pipefail
+          mkdir -p release-files
+          # Pull canonically named DMGs and updater bundles produced by the matrix
+          find artifacts -name 'Niyora-*-*.dmg' -exec cp {} release-files/ \;
+          find artifacts -name 'Niyora-*-*.app.tar.gz' -exec cp {} release-files/ \;
+          find artifacts -name 'Niyora-*-*.app.tar.gz.sig' -exec cp {} release-files/ \;
+          ls -la release-files
+
+      - name: Build latest.json (Tauri updater manifest)
+        id: manifest
+        run: |
+          set -eo pipefail
+          REF="${GITHUB_REF_NAME#v}"
+
+          ARM_SIG_FILE=$(find release-files -name "Niyora-${REF}-AppleSilicon.app.tar.gz.sig" | head -1)
+          INTEL_SIG_FILE=$(find release-files -name "Niyora-${REF}-Intel.app.tar.gz.sig" | head -1)
+
+          if [ -z "$ARM_SIG_FILE" ] || [ -z "$INTEL_SIG_FILE" ]; then
+            echo "Missing signature files. ARM=$ARM_SIG_FILE INTEL=$INTEL_SIG_FILE"
+            ls release-files
+            exit 1
+          fi
+
+          ARM_SIG=$(cat "$ARM_SIG_FILE")
+          INTEL_SIG=$(cat "$INTEL_SIG_FILE")
+          PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          # Notes: pull the tag's release notes if available; fallback to a generic line.
+          NOTES="See https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }} for release notes."
+
+          jq -n \
+            --arg version "$REF" \
+            --arg notes "$NOTES" \
+            --arg pub_date "$PUB_DATE" \
+            --arg arm_url "https://downloads.niyora.com/Niyora-${REF}-AppleSilicon.app.tar.gz" \
+            --arg arm_sig "$ARM_SIG" \
+            --arg intel_url "https://downloads.niyora.com/Niyora-${REF}-Intel.app.tar.gz" \
+            --arg intel_sig "$INTEL_SIG" \
+            '{
+              version: $version,
+              notes: $notes,
+              pub_date: $pub_date,
+              platforms: {
+                "darwin-aarch64": { signature: $arm_sig, url: $arm_url },
+                "darwin-x86_64":  { signature: $intel_sig, url: $intel_url }
+              }
+            }' > release-files/latest.json
+
+          echo "--- latest.json ---"
+          cat release-files/latest.json
+
+      - name: Install wrangler
+        run: npm install -g wrangler
+
+      - name: Upload latest.json to Cloudflare R2
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          wrangler r2 object put \
+            "niyora-downloads/latest.json" \
+            --file release-files/latest.json \
+            --content-type "application/json" \
+            --remote
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Niyora ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            release-files/*.dmg
+            release-files/latest.json
