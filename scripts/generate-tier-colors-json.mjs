@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
  * Generate public/tier-colors.json from src/tiers.ts canonical values.
- * Run via: node --import tsx/esm scripts/generate-tier-colors-json.mjs
- * (requires tsx: pnpm add -D tsx)
+ * Run via (tsx):   node --import tsx/esm scripts/generate-tier-colors-json.mjs
+ * Run via (Node 22+): node --experimental-strip-types scripts/generate-tier-colors-json.mjs
+ * tsx option requires: pnpm add -D tsx
  */
 
 import { writeFileSync } from "fs";
