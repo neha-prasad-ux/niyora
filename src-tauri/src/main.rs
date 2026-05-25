@@ -645,6 +645,10 @@ fn main() {
                 });
             }
 
+            // Periodic update check every ~24h while the app stays running.
+            // No-op in debug builds. See updater::start_periodic_check.
+            updater::start_periodic_check(app.handle().clone());
+
             // Composite the coloured electron over the template body. We
             // wait briefly so the NSStatusItem is fully wired up — the
             // tray builder finishes synchronously above, but the underlying
