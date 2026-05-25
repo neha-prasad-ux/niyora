@@ -51,6 +51,9 @@ export const TIERS: Tier[] = [
 /**
  * Canonical HSL color definitions for each tier.
  * These match the orb's visual progression on the marketing site.
+ *
+ * After changing any value here, run `pnpm run generate:tier-colors` to
+ * regenerate public/tier-colors.json. CI will fail if they diverge.
  */
 export const TIER_COLORS: Record<Tier["id"], TierColor> = {
   spark:      { hue: 30,  saturation: 70, lightness: 60 }, // warm orange, first flame
