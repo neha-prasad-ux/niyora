@@ -391,15 +391,15 @@ fn main() {
                     Ok(have) => {
                         if want && !have {
                             if let Err(e) = mgr.enable() {
-                                eprintln!("[autostart] enable failed: {e}");
+                                eprintln!("[autostart] self-heal enable failed: {e}");
                             }
                         } else if !want && have {
                             if let Err(e) = mgr.disable() {
-                                eprintln!("[autostart] disable failed: {e}");
+                                eprintln!("[autostart] self-heal disable failed: {e}");
                             }
                         }
                     }
-                    Err(e) => eprintln!("[autostart] is_enabled failed: {e}"),
+                    Err(e) => eprintln!("[autostart] is_enabled check failed: {e}"),
                 }
             }
 

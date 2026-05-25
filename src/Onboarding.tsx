@@ -34,14 +34,13 @@ const SLIDES: Slide[] = [
       "We notify you when you need calm",
       "Breathing and mindful practices, combined",
       "Every practice under 60 seconds",
-      "Launches with your Mac so it's there when you need it",
     ],
   },
   {
     kind: "consent",
     title: "Private by design",
     noteHead: "Built independently, shaped by you.",
-    note: "Anonymous usage tells us what to make better next.\n\nStress scores, breath patterns, anything that identifies you. None of it leaves your Mac.",
+    note: "Anonymous usage tells us what to make better next.\n\nStress scores, breath patterns, anything that identifies you. None of it leaves your Mac.\n\nNiyora launches with your Mac so it's there when you need it.",
   },
 ];
 
