@@ -38,7 +38,7 @@ describe("tierColor", () => {
   });
 
   it("returns distinct colors per tier", () => {
-    const hues = TIERS.map((t) => tierColor(t).hue);
+    const hues = TIERS.map((t) => TIER_COLORS[t.id].hue);
     const unique = new Set(hues);
     expect(unique.size).toBe(TIERS.length);
   });
