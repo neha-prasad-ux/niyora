@@ -118,4 +118,9 @@ describe("sessionsToNext", () => {
     // At 7 sessions (glow tier), next is shine at 15: 15 - 7 = 8
     expect(sessionsToNext(7)).toBe(8);
   });
+
+  it("Math.max guard does not clamp a count already above the current tier threshold", () => {
+    // At 17 sessions (shine tier, threshold 15) next is radiance at 40: Math.max(0, 40 - 17) = 23
+    expect(sessionsToNext(17)).toBe(23);
+  });
 });
