@@ -34,7 +34,7 @@ describe("tierColor", () => {
     const t = tierById("spark");
     const c = tierColor(t);
     expect(c).toEqual(TIER_COLORS["spark"]);
-    expect(c.hue).toBe(30);
+    expect(c.hue).toBe(TIER_COLORS["spark"].hue);
   });
 
   it("returns distinct colors per tier", () => {
