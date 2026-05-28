@@ -61,6 +61,18 @@ describe("currentTier", () => {
     expect(currentTier(4).id).toBe("spark");
   });
 
+  it("stays at glow below shine threshold", () => {
+    expect(currentTier(14).id).toBe("glow");
+  });
+
+  it("stays at shine below radiance threshold", () => {
+    expect(currentTier(39).id).toBe("shine");
+  });
+
+  it("stays at radiance below brilliance threshold", () => {
+    expect(currentTier(79).id).toBe("radiance");
+  });
+
   it("advances to glow at exactly 5 sessions", () => {
     expect(currentTier(5).id).toBe("glow");
   });
@@ -117,6 +129,13 @@ describe("sessionsToNext", () => {
   it("counts remaining sessions correctly mid-tier", () => {
     // At 7 sessions (glow tier), next is shine at 15: 15 - 7 = 8
     expect(sessionsToNext(7)).toBe(8);
+  });
+
+  it("returns sessions to next tier when count is exactly on a non-top threshold", () => {
+    // At 5 sessions (glow, threshold 5), next is shine at 15: 15 - 5 = 10
+    expect(sessionsToNext(5)).toBe(10);
+    // At 15 sessions (shine, threshold 15), next is radiance at 40: 40 - 15 = 25
+    expect(sessionsToNext(15)).toBe(25);
   });
 
   it("Math.max guard does not clamp a count already above the current tier threshold", () => {
