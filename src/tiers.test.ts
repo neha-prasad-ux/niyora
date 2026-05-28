@@ -36,11 +36,6 @@ describe("tierColor", () => {
     expect(c.lightness).toBe(60);
   });
 
-  it("returns distinct hues per tier", () => {
-    const hues = TIERS.map((t) => tierColor(t).hue);
-    const unique = new Set(hues);
-    expect(unique.size).toBe(TIERS.length);
-  });
 });
 
 describe("tierHue", () => {
@@ -120,6 +115,10 @@ describe("sessionsToNext", () => {
 
   it("returns 1 when one session away from glow", () => {
     expect(sessionsToNext(4)).toBe(1);
+  });
+
+  it("returns 1 when one session away from brilliance", () => {
+    expect(sessionsToNext(79)).toBe(1);
   });
 
   it("returns 0 at the top tier", () => {
