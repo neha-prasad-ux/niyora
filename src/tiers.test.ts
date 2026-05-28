@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
   TIERS,
-  TIER_COLORS,
   tierById,
   tierColor,
   tierHue,
@@ -30,25 +29,27 @@ describe("tierById", () => {
 });
 
 describe("tierColor", () => {
-  it("returns the TierColor for a tier", () => {
-    const t = tierById("spark");
-    const c = tierColor(t);
-    expect(c).toEqual(TIER_COLORS["spark"]);
-    expect(c.hue).toBe(TIER_COLORS["spark"].hue);
+  it("returns the concrete TierColor for spark", () => {
+    const c = tierColor(tierById("spark"));
+    expect(c.hue).toBe(30);
+    expect(c.saturation).toBe(70);
+    expect(c.lightness).toBe(60);
   });
 
-  it("returns distinct colors per tier", () => {
-    const hues = TIERS.map((t) => TIER_COLORS[t.id].hue);
+  it("returns distinct hues per tier", () => {
+    const hues = TIERS.map((t) => tierColor(t).hue);
     const unique = new Set(hues);
     expect(unique.size).toBe(TIERS.length);
   });
 });
 
 describe("tierHue", () => {
-  it("returns hue matching TIER_COLORS", () => {
-    for (const t of TIERS) {
-      expect(tierHue(t)).toBe(TIER_COLORS[t.id].hue);
-    }
+  it("returns the correct hue for each tier", () => {
+    expect(tierHue(tierById("spark"))).toBe(30);
+    expect(tierHue(tierById("glow"))).toBe(335);
+    expect(tierHue(tierById("shine"))).toBe(280);
+    expect(tierHue(tierById("radiance"))).toBe(230);
+    expect(tierHue(tierById("brilliance"))).toBe(210);
   });
 });
 
