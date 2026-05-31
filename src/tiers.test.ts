@@ -128,6 +128,8 @@ describe("sessionsToNext", () => {
   it("counts remaining sessions correctly mid-tier", () => {
     // At 7 sessions (glow tier), next is shine at 15: 15 - 7 = 8
     expect(sessionsToNext(7)).toBe(8);
+    // At 17 sessions (shine tier), next is radiance at 40: 40 - 17 = 23
+    expect(sessionsToNext(17)).toBe(23);
   });
 
   it("returns sessions to next tier when count is exactly on a non-top threshold", () => {
@@ -135,11 +137,6 @@ describe("sessionsToNext", () => {
     expect(sessionsToNext(5)).toBe(10);
     // At 15 sessions (shine, threshold 15), next is radiance at 40: 40 - 15 = 25
     expect(sessionsToNext(15)).toBe(25);
-  });
-
-  it("Math.max guard does not clamp a count already above the current tier threshold", () => {
-    // At 17 sessions (shine tier, threshold 15) next is radiance at 40: Math.max(0, 40 - 17) = 23
-    expect(sessionsToNext(17)).toBe(23);
   });
 
   it("Math.max guard returns non-negative when count is above the former next-tier threshold", () => {
