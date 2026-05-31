@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { isWindows } from "./platform";
 
 interface Props {
   onDone: () => void;
@@ -26,7 +27,7 @@ const SLIDES: Slide[] = [
     title: "Calm in 60 seconds.",
     body: "For founders, sales, devs, PMs, designers.",
     bullets: [
-      "Data stays on your Mac",
+      isWindows ? "Data stays on your device" : "Data stays on your Mac",
       "We spot stress in your work patterns",
       "We notify you when you need calm",
       "Breathing and mindful practices, combined",
@@ -36,7 +37,9 @@ const SLIDES: Slide[] = [
   {
     title: "Private by design",
     noteHead: "Your data stays local.",
-    note: "Stress scores, breath patterns, anything that identifies you. None of it leaves your Mac.\n\nNiyora launches with your Mac so it's there when you need it.",
+    note: isWindows
+      ? "Stress scores, breath patterns, anything that identifies you. None of it leaves your device.\n\nNiyora starts with Windows so it's there when you need it."
+      : "Stress scores, breath patterns, anything that identifies you. None of it leaves your Mac.\n\nNiyora launches with your Mac so it's there when you need it.",
   },
 ];
 
@@ -100,11 +103,19 @@ export default function Onboarding({ onDone }: Props) {
       {/* "I live here" pointer . shown only on the first slide so users can
           see where to find Niyora later, without distracting once they're in. */}
       {index === 0 && (
-        <div className="onboarding-here" aria-hidden="true">
+        <div
+          className="onboarding-here"
+          aria-hidden="true"
+          style={isWindows ? { top: "auto", left: "auto", bottom: 8, right: 18 } : undefined}
+        >
           <svg className="onboarding-here-arrow" width="16" height="20" viewBox="0 0 16 20" fill="none">
-            <path d="M8 2 L8 18 M8 2 L3 7 M8 2 L13 7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+            {isWindows ? (
+              <path d="M2 2 L14 18 M14 18 L8 18 M14 18 L14 12" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+            ) : (
+              <path d="M8 2 L8 18 M8 2 L3 7 M8 2 L13 7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+            )}
           </svg>
-          <span className="onboarding-here-text">I live up here.</span>
+          <span className="onboarding-here-text">{isWindows ? "I live down here." : "I live up here."}</span>
         </div>
       )}
       <div className="onboarding-content">
