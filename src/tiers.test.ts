@@ -139,9 +139,7 @@ describe("sessionsToNext", () => {
     expect(sessionsToNext(15)).toBe(25);
   });
 
-  it("Math.max guard returns non-negative when count is above the former next-tier threshold", () => {
-    // count 41 is above shine's next threshold (radiance at 40); currentTier advances to radiance.
-    // nextTier is now brilliance at 80. Math.max(0, 80 - 41) = 39, not negative.
+  it("returns correct count mid-radiance tier", () => {
     expect(sessionsToNext(41)).toBe(39);
   });
 });
