@@ -356,4 +356,37 @@ mod tests {
         assert_eq!(current_soul_tier(80), "brilliance");
         assert_eq!(current_soul_tier(999), "brilliance");
     }
+
+    #[test]
+    fn record_companion_session_rejects_unknown_technique_kind() {
+        let err = record_companion_session("Sun Salutation", "yoga", 60, 60, true, "2026-06-03T00:00:00Z")
+            .unwrap_err();
+        assert!(
+            err.contains("unknown technique_kind"),
+            "expected 'unknown technique_kind' in error, got: {err}"
+        );
+        assert!(err.contains("yoga"), "error should name the rejected kind: {err}");
+    }
+
+    #[test]
+    fn record_companion_session_rejects_empty_technique_kind() {
+        let err = record_companion_session("Box Breathing", "", 60, 60, true, "2026-06-03T00:00:00Z")
+            .unwrap_err();
+        assert!(
+            err.contains("unknown technique_kind"),
+            "expected 'unknown technique_kind' in error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn record_companion_session_rejects_mixed_case_kind() {
+        // Validation is case-sensitive: "Breathing" (capital B) must not slip
+        // through the gate that only accepts lowercase "breathing".
+        let err = record_companion_session("Ujjayi", "Breathing", 64, 64, true, "2026-06-03T00:00:00Z")
+            .unwrap_err();
+        assert!(
+            err.contains("unknown technique_kind"),
+            "expected 'unknown technique_kind' in error, got: {err}"
+        );
+    }
 }
