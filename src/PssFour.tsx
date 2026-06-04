@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { isWindows } from "./platform";
 
 interface Props {
   onDone: () => void;
@@ -87,7 +88,7 @@ export default function PssFour({ onDone }: Props) {
           <div className="pss4-band-msg">{band.message}</div>
           <div className="pss4-result-note">
             Take this every once in a while to see how you feel over time.
-            Your scores stay on this Mac.
+            {isWindows ? " Your scores stay on this device." : " Your scores stay on this Mac."}
           </div>
           <button className="pss4-result-btn" onClick={onDone}>See history</button>
         </div>

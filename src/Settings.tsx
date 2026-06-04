@@ -6,6 +6,7 @@ import { useSnapshot, scoreToBallGradient } from "./useSnapshot";
 import { useSessionStats } from "./useSessionStats";
 import { TIERS, currentTier, nextTier, sessionsToNext, tierHue, type Tier } from "./tiers";
 import { CompanionCard } from "./CompanionCard";
+import { isWindows } from "./platform";
 
 interface Props {
   onBack: () => void;
@@ -281,7 +282,9 @@ export default function Settings({ onBack, onOpenPss4 }: Props) {
               <div className="soul-toggle-text">
                 <div className="soul-cta-title">Launch at login</div>
                 <div className="soul-cta-blurb">
-                  Start Niyora when your Mac starts so reminders are always ready.
+                  {isWindows
+                    ? "Start Niyora when Windows starts so reminders are always ready."
+                    : "Start Niyora when your Mac starts so reminders are always ready."}
                 </div>
               </div>
               <label className="soul-switch" aria-label="Toggle launch at login">
@@ -301,7 +304,9 @@ export default function Settings({ onBack, onOpenPss4 }: Props) {
             <div className="soul-toggle-text">
               <div className="soul-cta-title">Anonymous analytics</div>
               <div className="soul-cta-blurb">
-                Helps shape what to improve next. Stress scores, breath patterns, and anything that identifies you stay on your Mac.
+                {isWindows
+                  ? "Helps shape what to improve next. Stress scores, breath patterns, and anything that identifies you stay on your device."
+                  : "Helps shape what to improve next. Stress scores, breath patterns, and anything that identifies you stay on your Mac."}
               </div>
             </div>
             <label className="soul-switch" aria-label="Toggle anonymous analytics">
@@ -335,7 +340,9 @@ export default function Settings({ onBack, onOpenPss4 }: Props) {
         <CompanionCard />
 
         <div className="soul-footer">
-          Niyora runs entirely on your Mac. No accounts, no profiles. Analytics are anonymous, optional, and only sent if you choose. Breathe easy.
+          {isWindows
+            ? "Niyora runs entirely on your device. No accounts, no profiles. Analytics are anonymous, optional, and only sent if you choose. Breathe easy."
+            : "Niyora runs entirely on your Mac. No accounts, no profiles. Analytics are anonymous, optional, and only sent if you choose. Breathe easy."}
           {version && <span className="soul-version">Version {version}</span>}
         </div>
 
