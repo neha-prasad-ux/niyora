@@ -13,6 +13,7 @@
 //!   →  auth                 {hmac_hex}                  // HMAC-SHA256(secret, nonce)
 //!   ←  authed   or   ← auth_failed (then close)
 //!   ←  status_update        {soul_tier, completed_sessions, current_tier, total_session_count}   (after authed)
+//!   ←  soul_state           {day_label, index}                     (after authed, v3+)
 //!   ←  request_measurement  {session_id, phase, technique_name}   (zero or more per session)
 //!   →  session_recorded     {technique_name, duration_sec, completed, recorded_at}   (v3 only)
 //! ```
@@ -178,6 +179,16 @@ pub enum ServerMessage {
         phase: String,
         technique_name: String,
     },
+    /// Mac's current situational soul-state. Sent after auth (v3+) and
+    /// again whenever the day label changes. Only the derived label and
+    /// index cross the wire, never the raw collector inputs (screen time,
+    /// keystrokes, meetings).
+    SoulState {
+        /// One of `"calm"`, `"normal"`, `"dense"`, `"heavy"`.
+        day_label: String,
+        /// Niyora Index 0-100. Higher = calmer day.
+        index: u8,
+    },
 }
 
 /// Payload encoded into the pairing QR code (base64 URL-safe, no padding).
@@ -269,6 +280,10 @@ mod tests {
                 completed_sessions: 7,
                 current_tier: "glow".into(),
                 total_session_count: 9,
+            },
+            ServerMessage::SoulState {
+                day_label: "dense".into(),
+                index: 42,
             },
             ServerMessage::RequestMeasurement {
                 session_id: "sess-1".into(),
@@ -456,6 +471,30 @@ mod tests {
         // Legacy fields must still be present for v3 companions.
         assert_eq!(v["soul_tier"], "shine");
         assert_eq!(v["completed_sessions"], 17);
+    }
+
+    #[test]
+    fn soul_state_serializes_with_snake_case_tag() {
+        let m = ServerMessage::SoulState {
+            day_label: "dense".into(),
+            index: 42,
+        };
+        let s = serde_json::to_string(&m).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(v["type"], "soul_state");
+        assert_eq!(v["day_label"], "dense");
+        assert_eq!(v["index"], 42);
+    }
+
+    #[test]
+    fn soul_state_round_trips() {
+        let m = ServerMessage::SoulState {
+            day_label: "heavy".into(),
+            index: 15,
+        };
+        let s = serde_json::to_string(&m).unwrap();
+        let back: ServerMessage = serde_json::from_str(&s).unwrap();
+        assert_eq!(m, back);
     }
 
     #[test]

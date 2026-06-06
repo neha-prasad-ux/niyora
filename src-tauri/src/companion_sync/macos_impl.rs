@@ -27,7 +27,7 @@ use hmac::{Hmac, Mac};
 use rand::RngCore;
 use serde::Serialize;
 use sha2::Sha256;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, Mutex};
@@ -273,9 +273,9 @@ impl CompanionSync {
 
         // 2. Resolve the secret: either bind a fresh pairing or look up
         // the secret of a previously-paired client.
-        let (server_id, server_name) = {
+        let (server_id, server_name, app_handle) = {
             let inner = self.inner.lock().await;
-            (inner.server_id.clone(), inner.server_name.clone())
+            (inner.server_id.clone(), inner.server_name.clone(), inner.app.clone())
         };
         // Echo the negotiated peer protocol back to the client rather than
         // PROTOCOL_VERSION. v2 companions that check exact equality on the
@@ -392,6 +392,25 @@ impl CompanionSync {
                     completed_sessions: stats.completed,
                     current_tier: tier.to_string(),
                     total_session_count: stats.total,
+                },
+            )
+            .await?;
+
+            // Send current situational soul-state. Only the derived label +
+            // index cross the wire; raw collector inputs stay local.
+            let (soul_label, soul_index) = if let Some(sit) = app_handle
+                .try_state::<crate::situational::SituationalStateHandle>()
+            {
+                let s = sit.0.lock().unwrap();
+                (s.day_label.as_str().to_string(), s.niyora_index)
+            } else {
+                ("calm".to_string(), 100u8)
+            };
+            write_message(
+                &mut write_half,
+                &ServerMessage::SoulState {
+                    day_label: soul_label,
+                    index: soul_index,
                 },
             )
             .await?;
@@ -558,9 +577,23 @@ impl CompanionSync {
                         state::touch_window_sent(&client_id, &now_rfc3339()).ok();
                         self.emit_state().await;
                     }
+                    if let ServerMessage::SoulState { .. } = &msg {
+                        if peer_protocol >= 3 {
+                            if let Err(e) = write_message(&mut write_half, &msg).await {
+                                eprintln!("[companion_sync] live soul_state write failed: {e}");
+                                return Ok(());
+                            }
+                        }
+                    }
                 }
             }
         }
+    }
+
+    /// Broadcast the current situational soul-state to all live authed peers.
+    /// Called by the situational score loop when the day label changes.
+    pub fn broadcast_soul_state(&self, day_label: String, index: u8) {
+        let _ = self.live_tx.send(ServerMessage::SoulState { day_label, index });
     }
 
     async fn emit_state(&self) {
