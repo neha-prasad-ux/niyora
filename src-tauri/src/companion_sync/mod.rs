@@ -48,6 +48,7 @@ mod stub {
 
     impl CompanionSync {
         pub fn enqueue_request(&self, _: MeasurementRequest) {}
+        pub fn broadcast_soul_state(&self, _day_label: String, _index: u8) {}
     }
 
     pub fn start(_app: AppHandle) -> CompanionSync {

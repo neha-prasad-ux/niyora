@@ -20,7 +20,10 @@ const APP_SWITCH_WINDOW_SECS: u64 = 30 * 60; // rolling 30-min window
 
 const INPUT_POLL_INTERVAL: Duration = Duration::from_secs(60); // diff over 1 min = events/min
 
-pub fn start_all(state: Arc<Mutex<SituationalState>>) {
+pub fn start_all(
+    state: Arc<Mutex<SituationalState>>,
+    on_soul_state_change: Option<Arc<dyn Fn(String, u8) + Send + Sync + 'static>>,
+) {
     // Immediate first compute so any score/message overrides + the initial
     // signal state surface right away — without waiting 60s for the score loop.
     {
@@ -41,7 +44,7 @@ pub fn start_all(state: Arc<Mutex<SituationalState>>) {
     thread::spawn(move || input_loop(s4));
 
     let s5 = state;
-    thread::spawn(move || score_loop(s5));
+    thread::spawn(move || score_loop(s5, on_soul_state_change));
 }
 
 /// Tracks continuous screen time. Polls system idle every 30s.
@@ -229,7 +232,14 @@ fn input_loop(state: Arc<Mutex<SituationalState>>) {
 
 /// Recomputes Niyora Index, base interval, day label, and contextual message
 /// once a minute. Also handles daily reset of cumulative counters.
-fn score_loop(state: Arc<Mutex<SituationalState>>) {
+/// Calls `on_soul_state_change` when the day label transitions so paired
+/// phones receive an updated `soul_state` frame without waiting for a reconnect.
+fn score_loop(
+    state: Arc<Mutex<SituationalState>>,
+    on_soul_state_change: Option<Arc<dyn Fn(String, u8) + Send + Sync + 'static>>,
+) {
+    let mut prev_label: &'static str = "";
+
     loop {
         thread::sleep(SCORE_POLL_INTERVAL);
 
@@ -239,16 +249,26 @@ fn score_loop(state: Arc<Mutex<SituationalState>>) {
         let weekday = now.weekday().num_days_from_monday();
         let after_hours = !(9..18).contains(&hour) || weekday >= 5;
 
-        let mut s = state.lock().unwrap();
+        let (new_label, new_index) = {
+            let mut s = state.lock().unwrap();
 
-        if today != s.last_reset_date {
-            s.cumulative_meeting_min_today = 0;
-            s.back_to_back_count = 0;
-            s.last_reset_date = today;
+            if today != s.last_reset_date {
+                s.cumulative_meeting_min_today = 0;
+                s.back_to_back_count = 0;
+                s.last_reset_date = today;
+            }
+
+            s.after_hours = after_hours;
+            score::recompute(&mut s);
+            (s.day_label.as_str(), s.niyora_index)
+        };
+
+        if new_label != prev_label {
+            prev_label = new_label;
+            if let Some(ref cb) = on_soul_state_change {
+                cb(new_label.to_string(), new_index);
+            }
         }
-
-        s.after_hours = after_hours;
-        score::recompute(&mut s);
     }
 }
 

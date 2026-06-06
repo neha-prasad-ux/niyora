@@ -374,6 +374,7 @@ fn main() {
             // Windows gets a no-op stub so cross-platform call sites
             // (sessions.rs) stay clean.
             let companion = companion_sync::start(app.handle().clone());
+            let companion_for_situational = companion.clone();
             app.manage(companion);
 
             // Anonymous launch event. Stays local unless the user opted in.
@@ -667,7 +668,11 @@ fn main() {
             }
 
             // Start situational signal collectors (idle/screen-time + score loop)
-            situational::start_all(situational.clone());
+            let on_soul_state_change: std::sync::Arc<dyn Fn(String, u8) + Send + Sync + 'static> =
+                std::sync::Arc::new(move |label, index| {
+                    companion_for_situational.broadcast_soul_state(label, index);
+                });
+            situational::start_all(situational.clone(), Some(on_soul_state_change));
 
             // Smart screen-time reminder thread
             let app_handle = app.handle().clone();
