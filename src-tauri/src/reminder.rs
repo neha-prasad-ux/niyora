@@ -39,6 +39,8 @@ const BODY_VARIANTS: &[&str] = &[
     "Six slow breaths activate the parasympathetic system in under 60s.",
     "Diaphragm breathing engages the vagus nerve, calming your heart rate.",
     "Box breathing cuts perceived stress in under two minutes.",
+    "HRV rises measurably after 60 seconds of paced breathing.",
+    "A slow exhale triggers the vagal brake, dropping heart rate quickly.",
     "A lot on the screen. A breath might help.",
     "Body's been working hard. Give it a minute?",
     "We had a deal. Sixty seconds?",
@@ -278,8 +280,8 @@ mod tests {
     #[test]
     fn body_variants_length() {
         assert!(
-            BODY_VARIANTS.len() >= 7,
-            "BODY_VARIANTS must have at least 7 entries"
+            BODY_VARIANTS.len() >= 10,
+            "BODY_VARIANTS must have at least 10 entries"
         );
         for s in BODY_VARIANTS {
             assert!(
