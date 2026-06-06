@@ -21,11 +21,18 @@ const WORK_HOUR_START: u32 = 9;
 const WORK_HOUR_END: u32 = 18;
 
 /// Rotating notification copy. Picked pseudo-randomly per fire so the
-/// nudge feels like a kind friend, not a robot. Keep these short — most
-/// users only read the first few words on macOS.
+/// nudge feels like a kind friend, not a robot. Keep these short: macOS
+/// truncates notification bodies around 90-100 chars.
+///
+/// At least 4 entries cite a specific mechanism, timeframe, or outcome so
+/// the nudge teaches as well as prompts. The rest keep a softer tone for
+/// variety. All strings must stay under 90 chars (enforced by a test below).
 const BODY_VARIANTS: &[&str] = &[
+    "Slow breathing lowers cortisol within 90 seconds. Worth one minute.",
+    "Six slow breaths activate the parasympathetic system in under 60s.",
+    "Diaphragm breathing engages the vagus nerve, calming your heart rate.",
+    "Box breathing cuts perceived stress in under two minutes.",
     "A lot on the screen. A breath might help.",
-    "Lots of switching today. Come back to one place.",
     "Body's been working hard. Give it a minute?",
     "We had a deal. Sixty seconds?",
     "You'll think clearer after a reset.",
@@ -224,4 +231,25 @@ pub fn snooze_for_minutes(
 pub fn cancel_snooze(state: tauri::State<'_, SnoozedUntil>) -> Result<(), String> {
     *state.0.lock().unwrap() = None;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BODY_VARIANTS;
+
+    #[test]
+    fn body_variants_length() {
+        assert!(
+            BODY_VARIANTS.len() >= 7,
+            "BODY_VARIANTS must have at least 7 entries"
+        );
+        for s in BODY_VARIANTS {
+            assert!(
+                s.len() <= 90,
+                "notification body exceeds 90 chars ({} chars): {:?}",
+                s.len(),
+                s
+            );
+        }
+    }
 }
