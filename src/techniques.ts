@@ -80,7 +80,7 @@ const breathingTechniques: BreathingTechnique[] = [
     name: "Box Breath",
     subtitle: "calms under pressure · 65s",
     unlockTier: "spark",
-    instructions: "Breathe through your nose. In 4, hold 4, out 4, hold 4.",
+    instructions: "Breathe through your nose. In 4, hold 4, out 4, hold 4. Steady rhythm.",
     benefits: "Let's lower your stress hormones and switch your body into rest mode.",
     phases: [
       { type: "inhale", label: "inhale", duration: 4 },
