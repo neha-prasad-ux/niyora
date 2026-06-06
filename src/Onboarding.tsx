@@ -12,6 +12,7 @@ const SLIDE_DURATION_MS = 3800;
 export default function Onboarding({ onDone }: Props) {
   const [index, setIndex] = useState(0);
   const [finishing, setFinishing] = useState(false);
+  const [qrSvg, setQrSvg] = useState<string | null>(null);
 
   // The first slide (value-prop with the bullet list) waits for a click.
   // It has the most to read and shouldn't disappear on people. Subsequent
@@ -23,6 +24,15 @@ export default function Onboarding({ onDone }: Props) {
     const ms = SLIDES[index].durationMs ?? SLIDE_DURATION_MS;
     const t = setTimeout(() => setIndex((i) => i + 1), ms);
     return () => clearTimeout(t);
+  }, [index]);
+
+  useEffect(() => {
+    if (!SLIDES[index].qrSlide) return;
+    let cancelled = false;
+    invoke<string>("onboarding_appstore_qr")
+      .then((svg) => { if (!cancelled) setQrSvg(svg); })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, [index]);
 
   // Finish onboarding: record the analytics choice, trigger the macOS
@@ -117,6 +127,13 @@ export default function Onboarding({ onDone }: Props) {
               {slide.note}
             </div>
           )}
+          {slide.qrSlide && (
+            <div
+              className="onboarding-qr"
+              dangerouslySetInnerHTML={qrSvg ? { __html: qrSvg } : undefined}
+              aria-label="Scan to install Niyora on iPhone"
+            />
+          )}
           {slide.bullets && (
             <ul className="onboarding-checklist">
               {slide.bullets.map((b, i) => (
@@ -151,7 +168,7 @@ export default function Onboarding({ onDone }: Props) {
           }}
           disabled={finishing}
         >
-          {finishing ? "Welcome…" : "Continue"}
+          {finishing ? "Welcome…" : slide.qrSlide ? "Skip" : "Continue"}
         </button>
       </div>
     </div>

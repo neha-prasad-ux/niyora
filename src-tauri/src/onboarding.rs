@@ -1,5 +1,23 @@
 use crate::config;
 
+/// Generates an inline SVG QR code for the iOS App Store listing.
+/// Used by the final onboarding screen on macOS so the user can scan
+/// to install Niyora on their iPhone without leaving the app.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub fn onboarding_appstore_qr() -> Result<String, String> {
+    use qrcode::render::svg;
+    use qrcode::QrCode;
+    const URL: &str = "https://niyora.com/ios";
+    let code = QrCode::new(URL.as_bytes()).map_err(|e| format!("qr: {e}"))?;
+    Ok(code
+        .render::<svg::Color>()
+        .min_dimensions(180, 180)
+        .dark_color(svg::Color("#111"))
+        .light_color(svg::Color("#fff"))
+        .build())
+}
+
 /// Returns true if the user has completed the first-launch onboarding flow.
 #[tauri::command]
 pub fn is_onboarded() -> bool {
