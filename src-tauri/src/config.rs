@@ -102,3 +102,78 @@ pub fn set_preferred_track(track: String) -> Result<(), String> {
     cfg.preferred_track = Some(track);
     save(&cfg)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_has_expected_values() {
+        let cfg = NiyoraConfig::default();
+        assert_eq!(cfg.last_pss4_date, None);
+        assert!(!cfg.onboarded);
+        assert_eq!(cfg.last_opened_date, None);
+        assert_eq!(cfg.companion_server_id, None);
+        assert!(cfg.launch_at_login, "launch_at_login must default to true");
+        assert_eq!(cfg.analytics_consent, None);
+        assert_eq!(cfg.analytics_id, None);
+        assert_eq!(cfg.preferred_track, None);
+    }
+
+    #[test]
+    fn empty_json_deserializes_to_defaults() {
+        // An old config file missing all keys must load without panicking.
+        // Catches regressions when a new field is added without a serde default.
+        let cfg: NiyoraConfig =
+            serde_json::from_str("{}").expect("empty JSON must deserialize");
+        assert!(!cfg.onboarded);
+        // launch_at_login uses default_true(), not the serde bool default (false).
+        assert!(cfg.launch_at_login, "launch_at_login must be true when absent from JSON");
+        assert_eq!(cfg.preferred_track, None);
+        assert_eq!(cfg.analytics_consent, None);
+    }
+
+    #[test]
+    fn set_preferred_track_rejects_unknown_names() {
+        // Returns before touching the filesystem, so safe in any test env.
+        let err = set_preferred_track("dubstep".to_string()).unwrap_err();
+        assert!(err.contains("unknown track"), "expected 'unknown track' in: {err}");
+        assert!(err.contains("dubstep"), "error must name the rejected value: {err}");
+    }
+
+    #[test]
+    fn set_preferred_track_rejects_empty_string() {
+        let err = set_preferred_track("".to_string()).unwrap_err();
+        assert!(err.contains("unknown track"), "expected 'unknown track' in: {err}");
+    }
+
+    #[test]
+    fn set_preferred_track_rejects_mixed_case() {
+        // Validation is case-sensitive: "Ocean" must not pass the allowlist gate.
+        let err = set_preferred_track("Ocean".to_string()).unwrap_err();
+        assert!(err.contains("unknown track"), "expected 'unknown track' in: {err}");
+    }
+
+    #[test]
+    fn niyora_config_round_trips_through_serde() {
+        let json = serde_json::json!({
+            "last_pss4_date": "2026-06-06",
+            "onboarded": true,
+            "last_opened_date": "2026-06-06",
+            "companion_server_id": "srv-abc",
+            "launch_at_login": false,
+            "analytics_consent": true,
+            "analytics_id": "anon-id-123",
+            "preferred_track": "ocean"
+        });
+        let s = serde_json::to_string(&json).unwrap();
+        let cfg: NiyoraConfig = serde_json::from_str(&s).expect("round-trip must succeed");
+        assert_eq!(cfg.last_pss4_date.as_deref(), Some("2026-06-06"));
+        assert!(cfg.onboarded);
+        assert_eq!(cfg.companion_server_id.as_deref(), Some("srv-abc"));
+        assert!(!cfg.launch_at_login);
+        assert_eq!(cfg.analytics_consent, Some(true));
+        assert_eq!(cfg.analytics_id.as_deref(), Some("anon-id-123"));
+        assert_eq!(cfg.preferred_track.as_deref(), Some("ocean"));
+    }
+}
