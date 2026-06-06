@@ -11,6 +11,8 @@ export interface Slide {
   noteHead?: string;
   /** Secondary detail text, rendered in a panel below the body. */
   note?: string;
+  /** When true, Onboarding renders an App Store QR instead of body copy. */
+  qrSlide?: boolean;
 }
 
 export const SLIDES: Slide[] = [
@@ -38,4 +40,5 @@ export const SLIDES: Slide[] = [
     body: "A soft intention, not a contract. One minute a day is enough.",
     durationMs: 5000,
   },
+  ...(!isWindows ? [{ title: "Niyora, in your pocket too.", qrSlide: true }] : []),
 ];

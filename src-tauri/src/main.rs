@@ -294,6 +294,8 @@ fn main() {
             onboarding::is_onboarded,
             onboarding::mark_onboarded,
             onboarding::request_notification_permission,
+            #[cfg(target_os = "macos")]
+            onboarding::onboarding_appstore_qr,
             telemetry::analytics_consent_status,
             telemetry::set_analytics_consent,
             config::get_preferred_track,

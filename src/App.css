@@ -1978,6 +1978,23 @@ html, body, #root {
   box-shadow: none;
 }
 
+.onboarding-qr {
+  background: #fff;
+  padding: 10px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 8px;
+  min-width: 180px;
+  min-height: 180px;
+}
+.onboarding-qr svg {
+  display: block;
+  width: 180px;
+  height: 180px;
+}
+
 /* "I live up here" pointer on the first onboarding slide.
    Anchors visually to the menu bar so users know where to find Niyora. */
 .onboarding-here {
