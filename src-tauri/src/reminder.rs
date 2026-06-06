@@ -16,6 +16,13 @@ pub struct LastSessionTime(pub Arc<Mutex<Instant>>);
 /// `None` = not snoozed. `Some(t)` and `Instant::now() < t` = currently snoozed.
 pub struct SnoozedUntil(pub Arc<Mutex<Option<Instant>>>);
 
+/// Timestamp of the most recent session recorded by the paired iPhone.
+/// `None` until the first `session_recorded` frame arrives from a companion.
+/// Read by the reminder loop to implement the active-device tie-break (spec
+/// section 7): if the phone had a session more recently than the Mac, the
+/// phone is the active device and the Mac stays silent.
+pub struct LastPhoneSessionTime(pub Arc<Mutex<Option<Instant>>>);
+
 const CHECK_INTERVAL: Duration = Duration::from_secs(60);
 const WORK_HOUR_START: u32 = 9;
 const WORK_HOUR_END: u32 = 18;
@@ -46,17 +53,40 @@ fn pick_body() -> &'static str {
     BODY_VARIANTS[nanos % BODY_VARIANTS.len()]
 }
 
+/// Returns true if the Mac should fire the reminder, false if it should defer
+/// to the paired phone.
+///
+/// Called only after the shared cooldown has expired. Rule: the device with
+/// the most recent session activity owns the notification; phone wins ties
+/// (spec section 7). When no phone session has been recorded in this app
+/// session (`phone_session_elapsed` is `None`), the Mac fires normally.
+pub(crate) fn mac_should_fire(
+    phone_session_elapsed: Option<Duration>,
+    mac_session_elapsed: Duration,
+) -> bool {
+    match phone_session_elapsed {
+        Some(phone_elapsed) => phone_elapsed > mac_session_elapsed,
+        None => true,
+    }
+}
+
 /// Smart screen-time reminder: notifies after the dynamic threshold elapses
 /// (40-120 min depending on situational signals), during work hours.
 /// Notifications carry inline action buttons:
 ///   "Breathe now"   → opens the panel (emits `request_panel_show`)
 ///   "Snooze 30 min" → sets the snooze deadline directly
 /// Clicking the notification body itself also opens the panel.
+///
+/// When a phone is paired, `last_phone_session` carries the timestamp of the
+/// most recent session the phone reported via `session_recorded`. The reminder
+/// loop uses it to implement the active-device rule: if the phone was active
+/// more recently than the Mac, the Mac defers (spec section 7).
 pub fn run(
     app: tauri::AppHandle,
     last_session: Arc<Mutex<Instant>>,
     situational: Arc<Mutex<SituationalState>>,
     snoozed_until: Arc<Mutex<Option<Instant>>>,
+    last_phone_session: Arc<Mutex<Option<Instant>>>,
 ) {
     use chrono::Local;
     use std::thread::sleep;
@@ -97,6 +127,13 @@ pub fn run(
 
         if elapsed < limit {
             notified_for_current_period = false;
+            continue;
+        }
+
+        // Active-device rule: when paired, defer to the phone if it had a
+        // session more recently than the Mac. Phone wins ties (spec section 7).
+        let phone_elapsed = last_phone_session.lock().unwrap().map(|t| t.elapsed());
+        if !mac_should_fire(phone_elapsed, elapsed) {
             continue;
         }
 
@@ -235,7 +272,8 @@ pub fn cancel_snooze(state: tauri::State<'_, SnoozedUntil>) -> Result<(), String
 
 #[cfg(test)]
 mod tests {
-    use super::BODY_VARIANTS;
+    use super::{mac_should_fire, BODY_VARIANTS};
+    use std::time::Duration;
 
     #[test]
     fn body_variants_length() {
@@ -251,5 +289,36 @@ mod tests {
                 s
             );
         }
+    }
+
+    // Active-device / shared-cooldown decision tests (spec section 7).
+
+    #[test]
+    fn no_phone_session_mac_fires() {
+        assert!(mac_should_fire(None, Duration::from_secs(3600)));
+    }
+
+    #[test]
+    fn phone_more_recent_mac_suppressed() {
+        // Phone session 30 min ago, Mac session 60 min ago.
+        assert!(!mac_should_fire(
+            Some(Duration::from_secs(30 * 60)),
+            Duration::from_secs(60 * 60),
+        ));
+    }
+
+    #[test]
+    fn mac_more_recent_mac_fires() {
+        // Mac session 30 min ago, phone session 60 min ago.
+        assert!(mac_should_fire(
+            Some(Duration::from_secs(60 * 60)),
+            Duration::from_secs(30 * 60),
+        ));
+    }
+
+    #[test]
+    fn equal_age_phone_wins_tiebreak() {
+        let age = Duration::from_secs(90 * 60);
+        assert!(!mac_should_fire(Some(age), age));
     }
 }

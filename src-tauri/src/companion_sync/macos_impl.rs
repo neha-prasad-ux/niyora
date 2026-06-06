@@ -20,14 +20,14 @@
 //! the network footprint zero for users who never use the HRV feature.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use hmac::{Hmac, Mac};
 use rand::RngCore;
 use serde::Serialize;
 use sha2::Sha256;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, Mutex};
@@ -494,6 +494,19 @@ impl CompanionSync {
                                         &recorded_at,
                                     ) {
                                         eprintln!("[companion_sync] session persist failed: {e}");
+                                    }
+                                    // Shared cooldown: reset the Mac's reminder clock so
+                                    // a breath on the phone silences the Mac for the full
+                                    // interval, same as a breath on the Mac would.
+                                    // Also stamp phone activity for the active-device rule.
+                                    {
+                                        let app = self.inner.lock().await.app.clone();
+                                        if let Some(ls) = app.try_state::<crate::reminder::LastSessionTime>() {
+                                            *ls.0.lock().unwrap() = Instant::now();
+                                        }
+                                        if let Some(lp) = app.try_state::<crate::reminder::LastPhoneSessionTime>() {
+                                            *lp.0.lock().unwrap() = Some(Instant::now());
+                                        }
                                     }
                                     // Send updated tier info back to the companion.
                                     let stats = crate::sessions::load_session_stats();

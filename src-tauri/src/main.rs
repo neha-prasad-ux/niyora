@@ -261,6 +261,7 @@ fn main() {
     let last_session = Arc::new(Mutex::new(Instant::now()));
     let situational = Arc::new(Mutex::new(SituationalState::new()));
     let snoozed: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
+    let last_phone_session: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
     let tray_rect: Arc<Mutex<Option<(f64, f64, f64, f64)>>> = Arc::new(Mutex::new(None));
     let session_active: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
     let current_tray_state: Arc<Mutex<TrayState>> = Arc::new(Mutex::new(TrayState::Measuring));
@@ -271,6 +272,7 @@ fn main() {
         .manage(LastSessionTime(last_session.clone()))
         .manage(SituationalStateHandle(situational.clone()))
         .manage(SnoozedUntil(snoozed.clone()))
+        .manage(reminder::LastPhoneSessionTime(last_phone_session.clone()))
         .manage(TrayRect(tray_rect.clone()))
         .manage(SessionActive(session_active.clone()))
         .manage(CurrentTrayState(current_tray_state.clone()))
@@ -674,12 +676,14 @@ fn main() {
             let last_session_for_thread = last_session.clone();
             let situational_for_thread = situational.clone();
             let snoozed_for_thread = snoozed.clone();
+            let last_phone_session_for_thread = last_phone_session.clone();
             std::thread::spawn(move || {
                 reminder::run(
                     app_handle,
                     last_session_for_thread,
                     situational_for_thread,
                     snoozed_for_thread,
+                    last_phone_session_for_thread,
                 );
             });
 
