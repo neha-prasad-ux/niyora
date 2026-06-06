@@ -1133,6 +1133,13 @@ export default function BreathingSession({ sessionId, onComplete, snapshot, comp
         ctx.fillText(s.shownLabel, cx, labelY);
         ctx.restore();
 
+        // Next-phase cue: fades with labelOpacity so both lines swap together.
+        const bt2 = technique as BreathingTechnique;
+        const nextPhase = bt2.phases[(s.phaseIndex + 1) % bt2.phases.length];
+        ctx.font = "400 12px 'Poppins', sans-serif";
+        ctx.fillStyle = `rgba(255, 255, 255, ${s.labelOpacity * 0.55})`;
+        ctx.fillText("then " + nextPhase.label.toLowerCase(), cx, HEIGHT * 0.755);
+
         // Persistent technique instruction below the active word.
         // Stays visible the whole session so users never have to
         // remember the rhythm. Drawn without a shadow so it reads as
