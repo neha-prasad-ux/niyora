@@ -390,6 +390,8 @@ impl CompanionSync {
                 &ServerMessage::StatusUpdate {
                     soul_tier: tier.to_string(),
                     completed_sessions: stats.completed,
+                    current_tier: tier.to_string(),
+                    total_session_count: stats.total,
                 },
             )
             .await?;
@@ -501,6 +503,8 @@ impl CompanionSync {
                                         &ServerMessage::StatusUpdate {
                                             soul_tier: tier.to_string(),
                                             completed_sessions: stats.completed,
+                                            current_tier: tier.to_string(),
+                                            total_session_count: stats.total,
                                         },
                                     )
                                     .await
