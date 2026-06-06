@@ -1,47 +1,11 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { isWindows } from "./platform";
+import { SLIDES } from "./onboarding-slides";
 
 interface Props {
   onDone: () => void;
 }
-
-interface Slide {
-  eyebrow?: string;
-  title: string;
-  body?: string;
-  bullets?: string[];
-  /** Optional override for how long this slide auto-displays before
-   * advancing. Defaults to SLIDE_DURATION_MS. Bullet-heavy slides need
-   * more time so the user can actually read them. */
-  durationMs?: number;
-  /** Bold heading line at the top of the note panel. */
-  noteHead?: string;
-  /** Secondary detail text, rendered in a panel below the body. */
-  note?: string;
-}
-
-const SLIDES: Slide[] = [
-  {
-    eyebrow: "Niyora",
-    title: "Calm in 60 seconds.",
-    body: "For founders, sales, devs, PMs, designers.",
-    bullets: [
-      isWindows ? "Data stays on your device" : "Data stays on your Mac",
-      "We spot stress in your work patterns",
-      "We notify you when you need calm",
-      "Breathing and mindful practices, combined",
-      "Every practice under 60 seconds",
-    ],
-  },
-  {
-    title: "Private by design",
-    noteHead: "Your data stays local.",
-    note: isWindows
-      ? "Stress scores, breath patterns, anything that identifies you. None of it leaves your device.\n\nNiyora starts with Windows so it's there when you need it."
-      : "Stress scores, breath patterns, anything that identifies you. None of it leaves your Mac.\n\nNiyora launches with your Mac so it's there when you need it.",
-  },
-];
 
 const SLIDE_DURATION_MS = 3800;
 
