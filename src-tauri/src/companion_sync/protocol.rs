@@ -12,7 +12,7 @@
 //!   ←  challenge            {nonce_hex}
 //!   →  auth                 {hmac_hex}                  // HMAC-SHA256(secret, nonce)
 //!   ←  authed   or   ← auth_failed (then close)
-//!   ←  status_update        {soul_tier, completed_sessions}   (after authed)
+//!   ←  status_update        {soul_tier, completed_sessions, current_tier, total_session_count}   (after authed)
 //!   ←  request_measurement  {session_id, phase, technique_name}   (zero or more per session)
 //!   →  session_recorded     {technique_name, duration_sec, completed, recorded_at}   (v3 only)
 //! ```
@@ -152,9 +152,18 @@ pub enum ServerMessage {
     /// Mac's current Soul tier and session count, sent after auth and
     /// after each session_recorded so paired mode can display Mac-side
     /// state. v3+ only.
+    ///
+    /// `soul_tier` and `completed_sessions` are the v3 field names retained
+    /// for backward compat with paired-v3 iOS builds. `current_tier` and
+    /// `total_session_count` are the v4-companion field names added additively;
+    /// old v3 companions ignore them. `total_session_count` counts every
+    /// session entry (completed + abandoned), while `completed_sessions`
+    /// counts only sessions where `completed == true`.
     StatusUpdate {
         soul_tier: String,
         completed_sessions: u32,
+        current_tier: String,
+        total_session_count: u32,
     },
     /// Tells the phone to start a 30s PPG capture for one side of a
     /// session. The Mac emits these only when the user taps "Measure
@@ -258,6 +267,8 @@ mod tests {
             ServerMessage::StatusUpdate {
                 soul_tier: "glow".into(),
                 completed_sessions: 7,
+                current_tier: "glow".into(),
+                total_session_count: 9,
             },
             ServerMessage::RequestMeasurement {
                 session_id: "sess-1".into(),
@@ -415,12 +426,36 @@ mod tests {
         let m = ServerMessage::StatusUpdate {
             soul_tier: "radiance".into(),
             completed_sessions: 42,
+            current_tier: "radiance".into(),
+            total_session_count: 45,
         };
         let s = serde_json::to_string(&m).unwrap();
         let v: serde_json::Value = serde_json::from_str(&s).unwrap();
         assert_eq!(v["type"], "status_update");
         assert_eq!(v["soul_tier"], "radiance");
         assert_eq!(v["completed_sessions"], 42);
+    }
+
+    #[test]
+    fn identify_response_carries_current_tier_and_total_session_count() {
+        // Asserts that the status_update sent after an iOS-style identify+auth
+        // carries the v4-companion fields alongside the legacy v3 fields.
+        // total_session_count counts all entries (completed + abandoned);
+        // completed_sessions counts only sessions where completed == true.
+        let m = ServerMessage::StatusUpdate {
+            soul_tier: "shine".into(),
+            completed_sessions: 17,
+            current_tier: "shine".into(),
+            total_session_count: 20,
+        };
+        let s = serde_json::to_string(&m).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(v["type"], "status_update");
+        assert_eq!(v["current_tier"], "shine");
+        assert_eq!(v["total_session_count"], 20);
+        // Legacy fields must still be present for v3 companions.
+        assert_eq!(v["soul_tier"], "shine");
+        assert_eq!(v["completed_sessions"], 17);
     }
 
     #[test]
