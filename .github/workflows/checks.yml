@@ -26,7 +26,7 @@ jobs:
 
   rust-check:
     name: Rust cargo check
-    runs-on: macos-latest
+    runs-on: [self-hosted, macOS]
     steps:
       - uses: actions/checkout@v4
 
