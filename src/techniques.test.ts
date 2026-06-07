@@ -71,11 +71,12 @@ describe("randomTechnique", () => {
     expect(t.name).toBe("Box Breath");
   });
 
-  it("returns a Technique when completedSessions is undefined", () => {
-    const t = randomTechnique(undefined);
-    expect(t).toBeDefined();
-    expect(typeof t.name).toBe("string");
-    expect(techniques.some((u) => u.name === t.name)).toBe(true);
+  it("undefined fallback draws from the full pool, not only spark-tier", () => {
+    const sparkNames = new Set(unlockedTechniques(0).map((t) => t.name));
+    const nonSparkTechniques = techniques.filter((t) => !sparkNames.has(t.name));
+    expect(nonSparkTechniques.length).toBeGreaterThan(0);
+    const results = Array.from({ length: 50 }, () => randomTechnique(undefined));
+    expect(results.some((t) => !sparkNames.has(t.name))).toBe(true);
   });
 
   it("returns a technique within the unlocked set for a known session count", () => {
