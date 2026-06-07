@@ -1602,6 +1602,39 @@ html, body, #root {
   color: rgba(255, 255, 255, 0.4);
 }
 
+.soul-data-dir {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.soul-data-dir-path {
+  font-family: "SF Mono", ui-monospace, monospace;
+  font-size: 9.5px;
+  color: rgba(255, 255, 255, 0.42);
+  word-break: break-all;
+}
+
+.soul-data-dir-open {
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 10px;
+  padding: 2px 7px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s;
+}
+
+.soul-data-dir-open:hover {
+  background: rgba(255, 255, 255, 0.13);
+}
+
 /* ============================================================ */
 /* Pre-session secondary action + technique picker overlay */
 /* ============================================================ */

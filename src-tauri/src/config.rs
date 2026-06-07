@@ -84,6 +84,11 @@ pub fn save(cfg: &NiyoraConfig) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn get_data_dir() -> Option<String> {
+    app_data_dir().map(|p| p.display().to_string())
+}
+
+#[tauri::command]
 pub fn get_preferred_track() -> String {
     load().preferred_track.unwrap_or_else(|| "random".to_string())
 }

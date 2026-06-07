@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl, openPath } from "@tauri-apps/plugin-opener";
 import { useSnapshot, scoreToBallGradient } from "./useSnapshot";
 import { useSessionStats } from "./useSessionStats";
 import { TIERS, currentTier, nextTier, sessionsToNext, tierHue, type Tier } from "./tiers";
@@ -100,6 +100,13 @@ export default function Settings({ onBack, onOpenPss4 }: Props) {
     getVersion().then(setVersion).catch(() => {
       /* leave empty if the API is unavailable in dev preview */
     });
+  }, []);
+
+  const [dataDir, setDataDir] = useState<string | null>(null);
+  useEffect(() => {
+    invoke<string | null>("get_data_dir")
+      .then((d) => setDataDir(d ?? null))
+      .catch(() => setDataDir(null));
   }, []);
 
   // Launch at login: defaults to true for new installs.
@@ -344,6 +351,17 @@ export default function Settings({ onBack, onOpenPss4 }: Props) {
             ? "Niyora runs entirely on your device. No accounts, no profiles. Analytics are anonymous, optional, and only sent if you choose. Breathe easy."
             : "Niyora runs entirely on your Mac. No accounts, no profiles. Analytics are anonymous, optional, and only sent if you choose. Breathe easy."}
           {version && <span className="soul-version">Version {version}</span>}
+          {dataDir && (
+            <span className="soul-data-dir">
+              <span className="soul-data-dir-path">{dataDir}</span>
+              <button
+                className="soul-data-dir-open"
+                onClick={() => openPath(dataDir).catch(() => {})}
+              >
+                Open
+              </button>
+            </span>
+          )}
         </div>
 
         {import.meta.env.DEV && (
