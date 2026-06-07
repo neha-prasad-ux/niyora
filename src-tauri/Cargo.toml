@@ -36,6 +36,12 @@ mac-notification-sys = "0.6"
 mdns-sd = "0.11"
 tokio = { version = "1", features = ["net", "sync", "rt", "rt-multi-thread", "macros", "io-util", "time"] }
 security-framework = "3"
+# TLS for the pairing socket. The iOS app connects with NWProtocolTLS, so the
+# Mac must present a cert. Uses macOS SecureTransport (no cmake/openssl build
+# deps). Cert is self-signed and the phone accepts any cert; the HMAC handshake
+# is what actually authenticates the peer.
+native-tls = "0.2"
+tokio-native-tls = "0.3"
 hmac = "0.12"
 sha2 = "0.10"
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }

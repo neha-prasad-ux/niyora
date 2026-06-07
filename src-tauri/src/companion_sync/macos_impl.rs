@@ -29,8 +29,9 @@ use serde::Serialize;
 use sha2::Sha256;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 use tokio::sync::{broadcast, Mutex};
+use tokio_native_tls::TlsAcceptor;
 
 use super::history::{Phase, PhaseCapture};
 use super::pairing::PairingManager;
@@ -203,16 +204,17 @@ impl CompanionSync {
             inner.mdns_daemon = Some(daemon);
         }
 
+        let acceptor = build_pairing_tls_acceptor()?;
         let sync = self.clone();
         tauri::async_runtime::spawn(async move {
-            sync.run_accept_loop(listener).await;
+            sync.run_accept_loop(listener, acceptor).await;
         });
         eprintln!("[companion_sync] listener up on {host}:{port}");
         self.emit_state().await;
         Ok(())
     }
 
-    async fn run_accept_loop(self, listener: TcpListener) {
+    async fn run_accept_loop(self, listener: TcpListener, acceptor: TlsAcceptor) {
         loop {
             let (socket, addr) = match listener.accept().await {
                 Ok(c) => c,
@@ -223,20 +225,32 @@ impl CompanionSync {
                 }
             };
             let sync = self.clone();
+            let acceptor = acceptor.clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = sync.serve_peer(socket, addr).await {
+                eprintln!("[companion_sync] peer {addr} connected, starting TLS");
+                let tls = match acceptor.accept(socket).await {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("[companion_sync] tls handshake failed for {addr}: {e}");
+                        return;
+                    }
+                };
+                if let Err(e) = sync.serve_peer(tls, addr).await {
                     eprintln!("[companion_sync] peer {addr} ended: {e}");
                 }
             });
         }
     }
 
-    async fn serve_peer(
+    async fn serve_peer<S>(
         self,
-        socket: TcpStream,
+        stream: S,
         addr: std::net::SocketAddr,
-    ) -> Result<(), String> {
-        let (read_half, mut write_half) = socket.into_split();
+    ) -> Result<(), String>
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    {
+        let (read_half, mut write_half) = tokio::io::split(stream);
         let mut reader = BufReader::new(read_half);
         let mut line = String::new();
 
@@ -616,8 +630,20 @@ impl CompanionSync {
     }
 }
 
-async fn write_message(
-    write_half: &mut tokio::net::tcp::OwnedWriteHalf,
+/// Build the TLS acceptor for the pairing socket from the bundled self-signed
+/// cert. The phone accepts any cert; the HMAC handshake authenticates the peer.
+fn build_pairing_tls_acceptor() -> Result<TlsAcceptor, String> {
+    let cert_pem = include_str!("pairing_tls_cert.pem");
+    let key_pem = include_str!("pairing_tls_key.pem");
+    let identity = native_tls::Identity::from_pkcs8(cert_pem.as_bytes(), key_pem.as_bytes())
+        .map_err(|e| format!("tls identity: {e}"))?;
+    let acceptor =
+        native_tls::TlsAcceptor::new(identity).map_err(|e| format!("tls acceptor: {e}"))?;
+    Ok(TlsAcceptor::from(acceptor))
+}
+
+async fn write_message<W: tokio::io::AsyncWrite + Unpin>(
+    write_half: &mut W,
     msg: &ServerMessage,
 ) -> Result<(), String> {
     let mut line = serde_json::to_string(msg).map_err(|e| e.to_string())?;
