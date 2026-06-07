@@ -18,11 +18,11 @@ The Niyora macOS menu-bar app. Tauri 2 (Rust backend) + React 18 + TypeScript fr
 
 These are not preferences. They are non-negotiable. PRs that violate them will be closed.
 
-1. **No outbound network requests from the app.** Ever. No analytics. No telemetry. No remote config. No "anonymous" pings. No update checker, no Sentry, no PostHog.
+1. **Three egress types only; everything else is prohibited.** (1) Update-check: a plain version-JSON fetch to `downloads.niyora.com` with no personal data attached (see `updater.rs`). (2) Update binary download from the same host when a newer version is found. (3) Opt-in analytics: anonymous events forwarded to PostHog EU only when the user explicitly consented on the onboarding slide; allow-listed event types only; stress data never leaves the device (see `telemetry.rs`). No remote config. No Sentry. No cloud sync.
 2. **No accounts, no logins, no cloud sync.** Sessions live in `~/Library/Application Support/com.niyora.breathing/` as append-only JSONL.
 3. **Bundled assets only.** Fonts, sounds, icons all bundled with the app.
 4. **No keystroke logging.** The situational signal collectors count system-wide events but never read content.
-5. **macOS only for now.** No iOS, no Windows, no web app.
+5. **macOS and Windows are shipped.** iOS lives in the separate repo `niyora-ios`. No web app.
 
 ## How to work
 
