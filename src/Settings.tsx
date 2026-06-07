@@ -320,6 +320,21 @@ export default function Settings({ onBack, onOpenPss4 }: Props) {
           </div>
         </div>
 
+        <div className="soul-card soul-card-toggle">
+          <div className="soul-toggle-row">
+            <div className="soul-toggle-text">
+              <div className="soul-cta-title">
+                {isWindows
+                  ? "Open Niyora: Ctrl Alt Shift N"
+                  : "Open Niyora: Cmd Option Shift N"}
+              </div>
+              <div className="soul-cta-blurb">
+                Global shortcut to open the panel, even if the tray icon is hidden.
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div className="soul-card soul-card-cta">
           <div className="soul-cta-title">Message the founder</div>
           <div className="soul-cta-blurb">
