@@ -477,6 +477,7 @@ export default function BreathingSession({ sessionId, onComplete, snapshot, comp
   const rafRef = useRef<number>(0);
   const sizeRef = useRef({ w: LG_WIDTH, h: LG_HEIGHT });
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const reduceMotionRef = useRef(false);
   const trackMenuRef = useRef<HTMLDivElement | null>(null);
   const [muted, setMuted] = useState(false);
   const [preferredTrack, setPreferredTrack] = useState("random");
@@ -630,6 +631,12 @@ export default function BreathingSession({ sessionId, onComplete, snapshot, comp
     invoke<string>("get_preferred_track").then(setPreferredTrack).catch(() => {});
   }, []);
 
+  // Read once at mount; stored in a ref so the draw loop can check it
+  // per frame without triggering re-renders.
+  useEffect(() => {
+    reduceMotionRef.current = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  }, []);
+
   // Close the track dropdown when the user clicks anywhere outside it.
   // Same dismiss semantics as every other popover-style UI in the app.
   useEffect(() => {
@@ -736,6 +743,7 @@ export default function BreathingSession({ sessionId, onComplete, snapshot, comp
 
       // ── INTRO ──
       if (!s.waiting && !s.introDone) {
+        if (reduceMotionRef.current) s.introTime = INTRO_DURATION;
         s.introTime += dt;
         if (s.introTime < 1) { s.nameOpacity = lerpVal(s.nameOpacity, 0.9, dt * 4); s.subtitleOpacity = lerpVal(s.subtitleOpacity, 0.55, dt * 3); }
         else if (s.introTime < 2) { s.nameOpacity = 0.9; s.subtitleOpacity = 0.55; }
@@ -836,7 +844,7 @@ export default function BreathingSession({ sessionId, onComplete, snapshot, comp
       // ── UPDATE PARTICLES ──
       // When paused, skip physics so the "video" freezes on the current frame.
       // Audio is paused separately in togglePause().
-      if (!s.paused) for (const p of s.particles) {
+      if (!s.paused && !reduceMotionRef.current) for (const p of s.particles) {
         const t = s.time;
         const nx = s.noise(p.noiseOffsetX + t * 0.3, p.noiseOffsetY) * 0.8;
         const ny = s.noise(p.noiseOffsetX, p.noiseOffsetY + t * 0.3) * 0.8;
@@ -909,7 +917,7 @@ export default function BreathingSession({ sessionId, onComplete, snapshot, comp
       ctx.fillStyle = glowGrad; ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
       // ── RIVER + LEAF (only for "river" motion) ──
-      if (visual.motion === "river" && s.introDone && !s.done) {
+      if (visual.motion === "river" && s.introDone && !s.done && !reduceMotionRef.current) {
         const riverY = HEIGHT * 0.5; // river center line
         const riverBand = 80; // river height band
 
@@ -995,7 +1003,7 @@ export default function BreathingSession({ sessionId, onComplete, snapshot, comp
       }
 
       // ── TRATAKA FOCAL POINT (only for "orbit" motion) ──
-      if (visual.motion === "orbit" && s.introDone) {
+      if (visual.motion === "orbit" && s.introDone && !reduceMotionRef.current) {
         const focusX = cx, focusY = cy;
         // Gentle breathing glow — very slow pulse
         const pulse = 0.5 + Math.sin(s.time * 0.6) * 0.15;
@@ -1027,7 +1035,7 @@ export default function BreathingSession({ sessionId, onComplete, snapshot, comp
       }
 
       const boost = visual.brightnessBoost || 0;
-      for (const p of s.particles) {
+      if (!reduceMotionRef.current) for (const p of s.particles) {
         const ph = h + (p.noiseOffsetX % 20 - 10);
         const ps = Math.min(sat + 50, 90);
         const pl = Math.min(l + 50 + boost * 100, 85);
