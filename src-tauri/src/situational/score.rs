@@ -51,7 +51,7 @@ fn compute_interval(s: &SituationalState) -> u64 {
     if s.app_switches_last_30min > 30 { t -= 10; }
     if s.keystrokes_per_min > 200 { t -= 10; }
     if s.after_hours { t -= 10; }
-    // Productive zone: single-app focus under 90 min with few context switches.
+    // Productive zone: single-app focus up to 90 min with few context switches.
     // Skipped during after-hours so the late+focus compound rule isn't partially cancelled.
     if s.focus_block_min > 45 && s.focus_block_min <= 90 && s.app_switches_last_30min < 5
         && !s.after_hours
@@ -123,17 +123,15 @@ mod tests {
     use super::compute_interval;
     use crate::situational::SituationalState;
 
-    // Each test builds from a fresh SituationalState::new() so the calm-day
-    // bonus (+15 when no meetings and break was recent) applies consistently.
     // Tests assert relative ordering rather than exact values so they survive
     // future tuning of the base constant.
 
     #[test]
     fn focus_bonus_in_productive_zone() {
-        // 60-min single-app block with few switches earns the bonus.
         let mut s = SituationalState::new();
         s.focus_block_min = 60;
         s.app_switches_last_30min = 2;
+        s.cumulative_meeting_min_today = 1; // suppress calm-day bonus so focus bonus is the only upward signal
         assert!(
             compute_interval(&s) > 90,
             "productive focus block should lengthen interval above baseline"
@@ -142,17 +140,22 @@ mod tests {
 
     #[test]
     fn focus_block_above_90_shortens_interval() {
-        // 100-min block loses the bonus and takes the overrun penalty.
+        // switches = 5 suppresses the focus bonus for both states so only the
+        // overwork penalty differs across the 90-min boundary.
+        // meetings = 1 suppresses the calm-day bonus for both.
         let mut s_long = SituationalState::new();
-        s_long.focus_block_min = 100;
+        s_long.focus_block_min = 91;
+        s_long.app_switches_last_30min = 5;
+        s_long.cumulative_meeting_min_today = 1;
 
         let mut s_short = SituationalState::new();
-        s_short.focus_block_min = 60;
-        s_short.app_switches_last_30min = 2;
+        s_short.focus_block_min = 89;
+        s_short.app_switches_last_30min = 5;
+        s_short.cumulative_meeting_min_today = 1;
 
         assert!(
             compute_interval(&s_long) < compute_interval(&s_short),
-            "100-min focus block should fire sooner than 60-min productive block"
+            "91-min focus block should fire sooner than 89-min block"
         );
     }
 
