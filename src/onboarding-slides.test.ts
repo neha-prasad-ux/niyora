@@ -3,9 +3,9 @@ import { describe, it, expect, vi } from "vitest";
 vi.mock("./platform", () => ({ isWindows: false }));
 
 describe("SLIDES", () => {
-  it("has 3 slides after adding the pledge prompt", async () => {
+  it("has 4 slides on non-Windows (pledge + QR)", async () => {
     const { SLIDES } = await import("./onboarding-slides");
-    expect(SLIDES).toHaveLength(3);
+    expect(SLIDES).toHaveLength(4);
   });
 
   it("slide 0 is the value-prop slide", async () => {
