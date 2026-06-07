@@ -33,4 +33,11 @@ describe("SLIDES", () => {
     const { SLIDES } = await import("./onboarding-slides");
     expect(SLIDES[2].durationMs).toBeGreaterThanOrEqual(5000);
   });
+
+  it("slide 3 is the App Store QR slide on non-Windows", async () => {
+    const { SLIDES } = await import("./onboarding-slides");
+    const qr = SLIDES[3];
+    expect(qr.qrSlide).toBe(true);
+    expect(qr.title).toBe("Niyora, in your pocket too.");
+  });
 });
