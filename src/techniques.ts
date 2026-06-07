@@ -80,7 +80,7 @@ const breathingTechniques: BreathingTechnique[] = [
     name: "Box Breath",
     subtitle: "calms under pressure · 65s",
     unlockTier: "spark",
-    instructions: "In 4, hold 4, out 4, hold 4. Steady rhythm.",
+    instructions: "Breathe through your nose. In 4, hold 4, out 4, hold 4. Steady rhythm.",
     benefits: "Let's lower your stress hormones and switch your body into rest mode.",
     phases: [
       { type: "inhale", label: "inhale", duration: 4 },
@@ -195,7 +195,7 @@ const breathingTechniques: BreathingTechnique[] = [
     name: "Belly Breath",
     subtitle: "eases the body · 60s",
     unlockTier: "spark",
-    instructions: "Let your belly rise on the in-breath, soften on the out.",
+    instructions: "Breathe through your nose. Let your belly rise on the in-breath, soften on the out.",
     benefits: "Let's strengthen your body's stress resilience and bring down inflammation.",
     phases: [
       { type: "inhale", label: "breathe into belly", duration: 4 },
