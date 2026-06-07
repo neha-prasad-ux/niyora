@@ -3,9 +3,9 @@ import { describe, it, expect, vi } from "vitest";
 vi.mock("./platform", () => ({ isWindows: false }));
 
 describe("SLIDES", () => {
-  it("has 3 slides after adding the pledge prompt", async () => {
+  it("has 4 slides on non-Windows (pledge + QR)", async () => {
     const { SLIDES } = await import("./onboarding-slides");
-    expect(SLIDES).toHaveLength(3);
+    expect(SLIDES).toHaveLength(4);
   });
 
   it("slide 0 is the value-prop slide", async () => {
@@ -32,5 +32,12 @@ describe("SLIDES", () => {
   it("pledge slide durationMs is at least 5000", async () => {
     const { SLIDES } = await import("./onboarding-slides");
     expect(SLIDES[2].durationMs).toBeGreaterThanOrEqual(5000);
+  });
+
+  it("slide 3 is the App Store QR slide on non-Windows", async () => {
+    const { SLIDES } = await import("./onboarding-slides");
+    const qr = SLIDES[3];
+    expect(qr.qrSlide).toBe(true);
+    expect(qr.title).toBe("Niyora, in your pocket too.");
   });
 });
