@@ -42,8 +42,15 @@ struct SessionActive(Arc<Mutex<bool>>);
 struct LastTrayToggle(Arc<Mutex<Option<Instant>>>);
 
 #[tauri::command]
-fn set_session_active(active: bool, state: tauri::State<'_, SessionActive>) {
+fn set_session_active(active: bool, app_handle: tauri::AppHandle, state: tauri::State<'_, SessionActive>) {
     *state.0.lock().unwrap() = active;
+    #[cfg(target_os = "macos")]
+    {
+        let h = app_handle.clone();
+        let _ = app_handle.run_on_main_thread(move || {
+            if active { show_dimmer(&h); } else { hide_dimmer(&h); }
+        });
+    }
 }
 
 /// Returns true the first time the panel opens on a given local day, and
@@ -422,6 +429,9 @@ fn main() {
             // Convert the main window to an NSPanel for proper popover behavior
             #[cfg(target_os = "macos")]
             setup_panel(app.handle());
+            // Full-screen dim overlay shown during active breathing sessions.
+            #[cfg(target_os = "macos")]
+            setup_dimmer(app.handle());
             #[cfg(not(target_os = "macos"))]
             setup_window_focus_dismiss(app.handle());
 
@@ -777,6 +787,72 @@ fn setup_panel(app_handle: &tauri::AppHandle) {
             panel.order_out(None);
         }
     });
+}
+
+/// Create the dimmer NSPanel. Starts hidden; shown/hidden by show_dimmer/hide_dimmer.
+///
+/// The dimmer sits at window level 5 (above normal app windows at 0 and
+/// floating windows at 3, below the main orb panel at NSMainMenuWindowLevel+1).
+/// It is click-through so the user can still interact with other apps while
+/// the breathing session runs in front.
+#[cfg(target_os = "macos")]
+fn setup_dimmer(app_handle: &tauri::AppHandle) {
+    use tauri::WebviewWindowBuilder;
+    let window = WebviewWindowBuilder::new(
+        app_handle,
+        "dimmer",
+        tauri::WebviewUrl::App("dimmer.html".into()),
+    )
+    .title("")
+    .inner_size(800.0, 600.0)
+    .decorations(false)
+    .transparent(true)
+    .visible(false)
+    .build()
+    .expect("failed to create dimmer window");
+
+    let _ = window.set_ignore_cursor_events(true);
+
+    let panel = window.to_panel().unwrap();
+    panel.set_level(5);
+    panel.set_collection_behaviour(
+        NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces
+            | NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary
+            | NSWindowCollectionBehavior::NSWindowCollectionBehaviorFullScreenAuxiliary,
+    );
+    panel.set_style_mask(NSPANEL_STYLE_MASK_NON_ACTIVATING);
+}
+
+/// Show the dimmer, sized to cover the screen that contains the main panel.
+#[cfg(target_os = "macos")]
+fn show_dimmer(app_handle: &tauri::AppHandle) {
+    let Some(dimmer_win) = app_handle.get_webview_window("dimmer") else { return; };
+    if let Some(main_win) = app_handle.get_webview_window("main") {
+        if let Ok(Some(monitor)) = main_win.current_monitor() {
+            let pos = monitor.position();
+            let size = monitor.size();
+            let _ = dimmer_win.set_position(tauri::Position::Physical(
+                tauri::PhysicalPosition { x: pos.x, y: pos.y },
+            ));
+            let _ = dimmer_win.set_size(tauri::Size::Physical(
+                tauri::PhysicalSize { width: size.width, height: size.height },
+            ));
+        }
+    }
+    let panel = app_handle.get_webview_panel("dimmer").unwrap();
+    panel.show();
+}
+
+/// Hide the dimmer, no-op if it was already hidden.
+#[cfg(target_os = "macos")]
+fn hide_dimmer(app_handle: &tauri::AppHandle) {
+    if app_handle.get_webview_window("dimmer").is_none() {
+        return;
+    }
+    let panel = app_handle.get_webview_panel("dimmer").unwrap();
+    if panel.is_visible() {
+        panel.order_out(None);
+    }
 }
 
 /// Extract the tray icon's position+size from any TrayIconEvent variant
