@@ -75,6 +75,7 @@ describe("randomTechnique", () => {
     const t = randomTechnique(undefined);
     expect(t).toBeDefined();
     expect(typeof t.name).toBe("string");
+    expect(techniques.some((u) => u.name === t.name)).toBe(true);
   });
 
   it("returns a technique within the unlocked set for a known session count", () => {
@@ -88,10 +89,9 @@ describe("randomTechnique", () => {
   });
 
   it("never returns a technique locked above the current tier", () => {
-    const sessions = 0;
+    const sessions = 2;
     const sparkOnlyNames = new Set(unlockedTechniques(sessions).map((t) => t.name));
     for (let i = 0; i < 30; i++) {
-      if (randomTechnique(sessions).name === "Box Breath") continue;
       const t = randomTechnique(sessions);
       expect(sparkOnlyNames.has(t.name)).toBe(true);
     }
