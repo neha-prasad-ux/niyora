@@ -1616,6 +1616,7 @@ html, body, #root {
   font-size: 9.5px;
   color: rgba(255, 255, 255, 0.42);
   word-break: break-all;
+  user-select: text;
 }
 
 .soul-data-dir-open {
