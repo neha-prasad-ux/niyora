@@ -17,8 +17,8 @@
 //!   →  identify             {protocol, client_id, client_name}
 //!   ←  hello                {protocol, server_id, server_name}
 //!   ←  authed   or   ← auth_failed (then close)
-//!   ←  status_update        {soul_tier, completed_sessions, current_tier, total_session_count}
-//!   ←  soul_state           {day_label, index}
+//!   ←  status_update        {soul_tier, completed_sessions, current_tier, total_session_count, mac_native_completed, mac_native_total}
+//!   ←  soul_state           {day_label, index, source, ts}
 //!   ←  request_measurement  {session_id, phase, technique_name}   (zero or more per session)
 //!   →  session_recorded     {technique_name, duration_sec, completed, recorded_at}
 //! ```
@@ -157,6 +157,14 @@ pub enum ServerMessage {
         completed_sessions: u32,
         current_tier: String,
         total_session_count: u32,
+        /// Mac-native session counts, excluding sessions the Mac received from the
+        /// companion phone. The phone uses these for the "Your Mac" box so that
+        /// phone-native + mac-native does not double-count synced sessions.
+        /// Added in v4.1; absent on connections from older build stubs (treated as 0).
+        #[serde(default)]
+        mac_native_completed: u32,
+        #[serde(default)]
+        mac_native_total: u32,
     },
     /// Tells the phone to start a 30s PPG capture for one side of a
     /// session. The Mac emits these only when the user taps "Measure
@@ -180,6 +188,13 @@ pub enum ServerMessage {
         day_label: String,
         /// Niyora Index 0-100. Higher = calmer day.
         index: u8,
+        /// Always `"mac"` in v1. The phone has no passive stress sensor yet.
+        #[serde(default)]
+        source: String,
+        /// ISO 8601 timestamp of when the Mac sent this reading. The phone uses
+        /// this to apply a freshness window and hide stale readings.
+        #[serde(default)]
+        ts: String,
     },
 }
 
@@ -231,10 +246,14 @@ mod tests {
                 completed_sessions: 7,
                 current_tier: "glow".into(),
                 total_session_count: 9,
+                mac_native_completed: 5,
+                mac_native_total: 7,
             },
             ServerMessage::SoulState {
                 day_label: "dense".into(),
                 index: 42,
+                source: "mac".into(),
+                ts: "2026-06-08T12:00:00Z".into(),
             },
             ServerMessage::RequestMeasurement {
                 session_id: "sess-1".into(),
@@ -394,12 +413,16 @@ mod tests {
             completed_sessions: 42,
             current_tier: "radiance".into(),
             total_session_count: 45,
+            mac_native_completed: 38,
+            mac_native_total: 41,
         };
         let s = serde_json::to_string(&m).unwrap();
         let v: serde_json::Value = serde_json::from_str(&s).unwrap();
         assert_eq!(v["type"], "status_update");
         assert_eq!(v["soul_tier"], "radiance");
         assert_eq!(v["completed_sessions"], 42);
+        assert_eq!(v["mac_native_completed"], 38);
+        assert_eq!(v["mac_native_total"], 41);
     }
 
     #[test]
@@ -413,6 +436,8 @@ mod tests {
             completed_sessions: 17,
             current_tier: "shine".into(),
             total_session_count: 20,
+            mac_native_completed: 14,
+            mac_native_total: 17,
         };
         let s = serde_json::to_string(&m).unwrap();
         let v: serde_json::Value = serde_json::from_str(&s).unwrap();
@@ -422,6 +447,9 @@ mod tests {
         // Legacy fields must still be present for v3 companions.
         assert_eq!(v["soul_tier"], "shine");
         assert_eq!(v["completed_sessions"], 17);
+        // Native-only counts for the phone's "Your Mac" box.
+        assert_eq!(v["mac_native_completed"], 14);
+        assert_eq!(v["mac_native_total"], 17);
     }
 
     #[test]
@@ -429,12 +457,16 @@ mod tests {
         let m = ServerMessage::SoulState {
             day_label: "dense".into(),
             index: 42,
+            source: "mac".into(),
+            ts: "2026-06-08T12:00:00Z".into(),
         };
         let s = serde_json::to_string(&m).unwrap();
         let v: serde_json::Value = serde_json::from_str(&s).unwrap();
         assert_eq!(v["type"], "soul_state");
         assert_eq!(v["day_label"], "dense");
         assert_eq!(v["index"], 42);
+        assert_eq!(v["source"], "mac");
+        assert!(v["ts"].as_str().unwrap().starts_with("2026-"));
     }
 
     #[test]
@@ -442,9 +474,28 @@ mod tests {
         let m = ServerMessage::SoulState {
             day_label: "heavy".into(),
             index: 15,
+            source: "mac".into(),
+            ts: "2026-06-08T09:30:00Z".into(),
         };
         let s = serde_json::to_string(&m).unwrap();
         let back: ServerMessage = serde_json::from_str(&s).unwrap();
         assert_eq!(m, back);
+    }
+
+    #[test]
+    fn soul_state_ts_absent_deserializes_to_default() {
+        // Companions that receive a SoulState from an older Mac build (before ts
+        // was added) must not panic. source and ts default to empty string.
+        let raw = r#"{"type":"soul_state","day_label":"calm","index":85}"#;
+        let back: ServerMessage = serde_json::from_str(raw).unwrap();
+        match back {
+            ServerMessage::SoulState { day_label, index, source, ts } => {
+                assert_eq!(day_label, "calm");
+                assert_eq!(index, 85);
+                assert_eq!(source, "");
+                assert_eq!(ts, "");
+            }
+            other => panic!("expected SoulState, got {other:?}"),
+        }
     }
 }
