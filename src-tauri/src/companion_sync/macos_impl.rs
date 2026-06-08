@@ -546,6 +546,15 @@ impl CompanionSync {
                                     }
                                     self.emit_state().await;
                                 }
+                                Ok(ClientMessage::PhoneActive { active, ts }) => {
+                                    eprintln!("[companion_sync] phone_active active={active} ts={ts}");
+                                    if active {
+                                        let app = self.inner.lock().await.app.clone();
+                                        if let Some(lp) = app.try_state::<crate::reminder::LastPhoneSessionTime>() {
+                                            *lp.0.lock().unwrap() = Some(Instant::now());
+                                        }
+                                    }
+                                }
                                 Ok(other) => {
                                     eprintln!("[companion_sync] unexpected post-auth frame: {other:?}");
                                 }

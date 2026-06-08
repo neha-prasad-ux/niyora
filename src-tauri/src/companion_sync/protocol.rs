@@ -130,6 +130,10 @@ pub enum ClientMessage {
         /// elapsed.
         status: String,
     },
+    /// Phone foreground/background ping for the active-device rule. Sent by
+    /// the iOS app when it becomes active or inactive so the Mac can stay
+    /// silent while the phone is in use. Carries no HRV or session data.
+    PhoneActive { active: bool, ts: String },
 }
 
 /// A message from the Mac to the phone.
