@@ -1087,6 +1087,9 @@ export default function BreathingSession({ sessionId, onComplete, snapshot, comp
           ctx.font = "300 13px 'Poppins', sans-serif";
           ctx.fillStyle = `rgba(255, 245, 230, ${Math.max(0, subFinal)})`;
           ctx.fillText("take this calm with you", cx, HEIGHT * 0.70 + 24);
+          ctx.font = "300 12px 'Poppins', sans-serif";
+          ctx.fillStyle = `rgba(255, 245, 230, ${Math.max(0, subFinal * 0.55)})`;
+          ctx.fillText(technique.name, cx, HEIGHT * 0.70 + 48);
         }
       } else if (isMindful) {
         // Mindfulness prompt text — lower third, wrapped, gentle
