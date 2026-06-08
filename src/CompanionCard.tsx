@@ -11,6 +11,12 @@ interface PairedDevice {
   last_window_sent_at: string | null;
 }
 
+interface PairingRequest {
+  client_id: string;
+  client_name: string;
+  sas: string;
+}
+
 interface CompanionStatus {
   running: boolean;
   server_name: string;
@@ -19,12 +25,7 @@ interface CompanionStatus {
   paired_devices: PairedDevice[];
   pairing_active: boolean;
   pairing_seconds_remaining: number | null;
-}
-
-interface PairingQr {
-  payload_b64: string;
-  qr_svg: string;
-  seconds_remaining: number;
+  pending_requests: PairingRequest[];
 }
 
 /** Human-friendly "2 min ago" / "yesterday" / "just now" for an RFC3339
@@ -52,8 +53,8 @@ function relativeTime(iso: string | null): string {
 export function CompanionCard() {
   const [status, setStatus] = useState<CompanionStatus | null>(null);
   const [available, setAvailable] = useState<boolean | null>(null);
-  const [pairing, setPairing] = useState<PairingQr | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
   const tickRef = useRef<number | null>(null);
 
   // Initial fetch + state-event subscription. If the invoke rejects (no
@@ -86,11 +87,20 @@ export function CompanionCard() {
     };
   }, []);
 
-  // Local countdown for the pairing modal. Backend is the source of truth,
-  // but ticking locally every second gives a smooth seconds_remaining
-  // without an IPC round trip per second.
+  // Reseed the local countdown whenever the backend reports a fresh window
+  // remaining. Ticking locally avoids an IPC round trip per second.
+  const pairingActive = status?.pairing_active ?? false;
+  const backendRemaining = status?.pairing_seconds_remaining ?? null;
   useEffect(() => {
-    if (pairing === null) {
+    if (pairingActive && backendRemaining !== null) {
+      setSecondsLeft(backendRemaining);
+    } else {
+      setSecondsLeft(null);
+    }
+  }, [pairingActive, backendRemaining]);
+
+  useEffect(() => {
+    if (secondsLeft === null) {
       if (tickRef.current !== null) {
         window.clearInterval(tickRef.current);
         tickRef.current = null;
@@ -98,15 +108,13 @@ export function CompanionCard() {
       return;
     }
     tickRef.current = window.setInterval(() => {
-      setPairing((p) => {
-        if (p === null) return null;
-        if (p.seconds_remaining <= 1) {
-          // Expired locally · cancel server side too so the next start is
-          // clean. The user can simply tap Pair again.
+      setSecondsLeft((s) => {
+        if (s === null) return null;
+        if (s <= 1) {
           invoke("companion_cancel_pairing").catch(() => {});
           return null;
         }
-        return { ...p, seconds_remaining: p.seconds_remaining - 1 };
+        return s - 1;
       });
     }, 1000);
     return () => {
@@ -115,12 +123,14 @@ export function CompanionCard() {
         tickRef.current = null;
       }
     };
-  }, [pairing !== null]);
+  }, [secondsLeft === null]);
 
   if (available === false) return null;
   if (available === null) return null;
 
   const devices = status?.paired_devices ?? [];
+  const request = status?.pending_requests?.[0] ?? null;
+  const showModal = pairingActive || request !== null;
 
   return (
     <>
@@ -166,9 +176,7 @@ export function CompanionCard() {
           className="soul-cta-btn"
           onClick={() => {
             setError(null);
-            invoke<PairingQr>("companion_start_pairing")
-              .then((qr) => setPairing(qr))
-              .catch((e) => setError(String(e)));
+            invoke("companion_start_pairing").catch((e) => setError(String(e)));
           }}
         >
           {devices.length === 0 ? "Pair your iPhone" : "Pair another iPhone"}
@@ -179,12 +187,20 @@ export function CompanionCard() {
         {error !== null && <div className="companion-error">{error}</div>}
       </div>
 
-      {pairing !== null && (
+      {showModal && (
         <PairModal
-          qr={pairing}
+          request={request}
+          secondsLeft={secondsLeft}
           onCancel={() => {
             invoke("companion_cancel_pairing").catch(() => {});
-            setPairing(null);
+          }}
+          onApprove={(clientId) => {
+            invoke("companion_approve_pairing", { clientId }).catch((e) =>
+              setError(String(e)),
+            );
+          }}
+          onReject={(clientId) => {
+            invoke("companion_reject_pairing", { clientId }).catch(() => {});
           }}
         />
       )}
@@ -192,23 +208,67 @@ export function CompanionCard() {
   );
 }
 
-function PairModal({ qr, onCancel }: { qr: PairingQr; onCancel: () => void }) {
+function PairModal({
+  request,
+  secondsLeft,
+  onCancel,
+  onApprove,
+  onReject,
+}: {
+  request: PairingRequest | null;
+  secondsLeft: number | null;
+  onCancel: () => void;
+  onApprove: (clientId: string) => void;
+  onReject: (clientId: string) => void;
+}) {
+  // Two states drive one modal: searching for a phone, then approving the
+  // one that connected. The backend window stays open until the user acts.
+  if (request !== null) {
+    return (
+      <div className="companion-modal-backdrop">
+        <div className="companion-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="companion-modal-title">
+            {request.client_name} wants to connect
+          </div>
+          <div className="companion-sas">{request.sas}</div>
+          <div className="companion-modal-sub">
+            This number should match the one on your iPhone.
+          </div>
+          <div className="companion-modal-actions">
+            <button
+              className="companion-modal-cancel"
+              onClick={() => onReject(request.client_id)}
+            >
+              Not now
+            </button>
+            <button
+              className="soul-cta-btn"
+              onClick={() => onApprove(request.client_id)}
+            >
+              Allow
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="companion-modal-backdrop" onClick={onCancel}>
       <div className="companion-modal" onClick={(e) => e.stopPropagation()}>
         <div className="companion-modal-title">Pair your iPhone</div>
-        <ol className="companion-modal-steps">
-          <li>Open Niyora Companion on your iPhone.</li>
-          <li>Tap Connect to Mac.</li>
-          <li>Point the camera at this QR.</li>
-        </ol>
-        <div
-          className="companion-qr"
-          dangerouslySetInnerHTML={{ __html: qr.qr_svg }}
-        />
-        <div className="companion-modal-timer">
-          Expires in {formatRemaining(qr.seconds_remaining)}
+        <div className="companion-modal-sub">
+          Open Niyora on your iPhone and tap this Mac.
         </div>
+        <div className="companion-searching">
+          <span className="companion-searching-dot" />
+          Looking for your iPhone
+        </div>
+        {secondsLeft !== null && (
+          <div className="companion-modal-timer">
+            Open for {formatRemaining(secondsLeft)}
+          </div>
+        )}
         <button className="companion-modal-cancel" onClick={onCancel}>
           Cancel
         </button>

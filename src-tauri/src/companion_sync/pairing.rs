@@ -1,136 +1,139 @@
-//! In-memory pairing manager. When the user taps "Pair your iPhone" in
-//! Settings, we mint a fresh `PendingPairing` containing:
+//! Pairing window + pending-approval manager for the tap-and-approve flow.
 //!
-//! - a random 16-byte `pairing_id` (single-use)
-//! - a random 32-byte `secret` (the eventual HMAC key, never written to
-//!   disk until a phone consumes the pairing successfully)
-//! - the host/port the TCP listener bound to
-//! - an expiry `Instant`
+//! There is no QR and no pre-shared secret any more. Trust comes from two
+//! human acts, gated here:
 //!
-//! Lifecycle:
+//! 1. The Mac user opens the pair screen, which opens a time-boxed
+//!    **pairing window**. Only while the window is open will the Mac prompt
+//!    to approve an unknown phone. Outside the window an unknown phone is
+//!    refused, so a device on the wifi cannot pop prompts unprompted.
+//! 2. When an unknown phone completes the Noise handshake during the window,
+//!    `serve_peer` registers a **pending approval** carrying the phone's
+//!    name and the SAS, and awaits the human's decision. The Settings panel
+//!    shows "<phone> wants to connect" plus the number; clicking Allow
+//!    resolves the approval and the pairing completes.
 //!
-//! 1. `start()` returns a `QrPayload` to render on the Mac.
-//! 2. The phone scans the QR, connects, sends `identify { pairing_id }`.
-//! 3. `consume(pairing_id, client_id, client_name)` removes the pending
-//!    entry, writes the secret to Keychain keyed by `client_id`, registers
-//!    the device in `state.rs`, and returns the secret so the running
-//!    connection can keep using it for HMAC verification.
-//! 4. `cancel()` and `tick()` evict expired entries.
-//!
-//! Pending pairings are not persisted · if the app restarts mid-pairing,
-//! the user starts over. That's the right trade · persistence would mean
-//! a secret-in-progress sits on disk, weakening the "secret never leaves
-//! memory until tied to a phone" property.
+//! Nothing here is persisted. If the app restarts mid-pair the window is
+//! gone and the user starts over, which is the right trade for a flow that
+//! is only ever a few seconds long.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use rand::RngCore;
+use serde::Serialize;
+use tokio::sync::oneshot;
 
-use super::protocol::QrPayload;
+/// How long the pairing window stays open after the user taps "Pair". Long
+/// enough to pick the Mac on the phone and glance at the number, short
+/// enough that a forgotten-open window closes itself.
+pub const PAIRING_TTL: Duration = Duration::from_secs(120);
 
-pub const PAIRING_TTL: Duration = Duration::from_secs(90);
-
-#[derive(Debug, Clone)]
-pub struct PendingPairing {
-    pub secret: Vec<u8>,
-    pub expires_at: Instant,
+/// A phone that has handshaked during the window and is waiting on the human
+/// to click Allow. The `decision` sender is consumed when the user decides;
+/// dropping it (window closed, app quit) resolves the waiter as rejected.
+struct PendingApproval {
+    client_name: String,
+    sas: String,
+    decision: oneshot::Sender<bool>,
 }
 
-#[derive(Debug, Default)]
+/// Public shape of a waiting request, surfaced to the Settings panel so a
+/// reload re-renders the prompt even if it missed the live event.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct PairingRequest {
+    pub client_id: String,
+    pub client_name: String,
+    pub sas: String,
+}
+
+#[derive(Default)]
 pub struct PairingManager {
-    pending: HashMap<String, PendingPairing>,
+    window_expires_at: Option<Instant>,
+    pending: HashMap<String, PendingApproval>,
 }
 
 impl PairingManager {
     pub fn new() -> Self {
-        Self {
-            pending: HashMap::new(),
-        }
+        Self::default()
     }
 
-    /// Mint a fresh pairing. The QR payload includes everything the phone
-    /// needs · server identity, endpoint, pairing_id, secret.
-    pub fn start(
-        &mut self,
-        server_id: &str,
-        server_name: &str,
-        host: &str,
-        port: u16,
-    ) -> QrPayload {
-        let mut rng = rand::thread_rng();
-
-        let mut pairing_bytes = [0u8; 16];
-        rng.fill_bytes(&mut pairing_bytes);
-        let pairing_id = hex(&pairing_bytes);
-
-        let mut secret_bytes = [0u8; 32];
-        rng.fill_bytes(&mut secret_bytes);
-        let secret_hex = hex(&secret_bytes);
-
-        self.pending.insert(
-            pairing_id.clone(),
-            PendingPairing {
-                secret: secret_bytes.to_vec(),
-                expires_at: Instant::now() + PAIRING_TTL,
-            },
-        );
-
-        QrPayload {
-            v: 1,
-            server_id: server_id.to_string(),
-            server_name: server_name.to_string(),
-            host: host.to_string(),
-            port,
-            pairing_id,
-            secret_hex,
-        }
+    /// Open (or refresh) the pairing window.
+    pub fn open_window(&mut self) {
+        self.window_expires_at = Some(Instant::now() + PAIRING_TTL);
     }
 
-    /// Phone presented this `pairing_id`. If it is still valid and unused,
-    /// remove it from pending and return the bound secret. The caller is
-    /// responsible for writing the secret to the Keychain against the
-    /// phone's `client_id` and recording the pairing in `state.rs`.
-    pub fn consume(&mut self, pairing_id: &str) -> Option<Vec<u8>> {
-        self.tick();
-        self.pending.remove(pairing_id).map(|p| p.secret)
+    /// Close the window and reject every waiting approval. Called on cancel,
+    /// and whenever a pairing completes so a second unknown phone cannot
+    /// sneak in on the same window.
+    pub fn close_window(&mut self) {
+        self.window_expires_at = None;
+        self.pending.clear(); // dropping each sender resolves its waiter as rejected
     }
 
-    pub fn cancel_all(&mut self) {
-        self.pending.clear();
+    pub fn window_active(&self) -> bool {
+        self.window_expires_at
+            .map(|t| t > Instant::now())
+            .unwrap_or(false)
     }
 
-    /// Drop expired entries. Cheap enough to run on every consume() and on
-    /// every command-handler call · we are talking about at most a handful
-    /// of pending entries at a time.
-    pub fn tick(&mut self) {
-        let now = Instant::now();
-        self.pending.retain(|_, v| v.expires_at > now);
-    }
-
-    pub fn active_count(&self) -> usize {
-        self.pending.len()
-    }
-
-    /// Time remaining for any active pairing, for the UI countdown. We
-    /// return the maximum across all pending entries · in practice there
-    /// is only ever one, since the Settings UI calls `cancel_all` before
-    /// `start`.
+    /// Seconds left on the window, for the UI countdown.
     pub fn time_remaining(&self) -> Option<Duration> {
         let now = Instant::now();
-        self.pending
-            .values()
-            .map(|p| p.expires_at.saturating_duration_since(now))
-            .max()
+        self.window_expires_at
+            .filter(|t| *t > now)
+            .map(|t| t.saturating_duration_since(now))
     }
-}
 
-fn hex(bytes: &[u8]) -> String {
-    let mut s = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        s.push_str(&format!("{b:02x}"));
+    /// Register a phone waiting on approval and hand back the receiver
+    /// `serve_peer` awaits. Fails if the window is not open · the caller
+    /// turns that into an `auth_failed`. A second connect from the same
+    /// `client_id` replaces the earlier wait (its sender drops, resolving it
+    /// as rejected), which is what we want if a phone retries.
+    pub fn request_approval(
+        &mut self,
+        client_id: &str,
+        client_name: &str,
+        sas: &str,
+    ) -> Result<oneshot::Receiver<bool>, String> {
+        if !self.window_active() {
+            return Err("pairing window is not open".into());
+        }
+        let (tx, rx) = oneshot::channel();
+        self.pending.insert(
+            client_id.to_string(),
+            PendingApproval {
+                client_name: client_name.to_string(),
+                sas: sas.to_string(),
+                decision: tx,
+            },
+        );
+        Ok(rx)
     }
-    s
+
+    /// Resolve a waiting approval. Returns true if a matching request was
+    /// found. The receiver side gets `approved`; on approve the caller
+    /// persists the phone's static key and completes the pairing.
+    pub fn resolve(&mut self, client_id: &str, approved: bool) -> bool {
+        match self.pending.remove(client_id) {
+            Some(p) => {
+                let _ = p.decision.send(approved);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Snapshot of every waiting request, for `companion_status`.
+    pub fn pending_requests(&self) -> Vec<PairingRequest> {
+        self.pending
+            .iter()
+            .map(|(client_id, p)| PairingRequest {
+                client_id: client_id.clone(),
+                client_name: p.client_name.clone(),
+                sas: p.sas.clone(),
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -138,67 +141,66 @@ mod tests {
     use super::*;
 
     #[test]
-    fn start_returns_full_qr_payload_and_registers_pending() {
+    fn window_opens_and_reports_active() {
         let mut m = PairingManager::new();
-        let qr = m.start("server-1", "Neha's MacBook", "10.0.0.5", 51000);
-        assert_eq!(qr.server_id, "server-1");
-        assert_eq!(qr.host, "10.0.0.5");
-        assert_eq!(qr.port, 51000);
-        assert_eq!(qr.pairing_id.len(), 32, "16 random bytes hex-encoded");
-        assert_eq!(qr.secret_hex.len(), 64, "32 random bytes hex-encoded");
-        assert_eq!(m.active_count(), 1);
+        assert!(!m.window_active());
+        m.open_window();
+        assert!(m.window_active());
+        assert!(m.time_remaining().unwrap() <= PAIRING_TTL);
     }
 
     #[test]
-    fn consume_removes_pending_and_returns_secret() {
+    fn request_approval_requires_open_window() {
         let mut m = PairingManager::new();
-        let qr = m.start("s", "s name", "h", 1);
-        let secret = m.consume(&qr.pairing_id).expect("present");
-        assert_eq!(secret.len(), 32);
-        assert_eq!(m.active_count(), 0);
-        assert!(m.consume(&qr.pairing_id).is_none(), "single-use");
+        assert!(m.request_approval("c1", "Neha's iPhone", "123 456").is_err());
+        m.open_window();
+        assert!(m.request_approval("c1", "Neha's iPhone", "123 456").is_ok());
     }
 
     #[test]
-    fn unknown_pairing_id_is_none() {
+    fn approve_resolves_the_waiter_true() {
         let mut m = PairingManager::new();
-        m.start("s", "s name", "h", 1);
-        assert!(m.consume("never-issued").is_none());
+        m.open_window();
+        let mut rx = m.request_approval("c1", "iPhone", "111 222").unwrap();
+        assert!(m.resolve("c1", true));
+        assert_eq!(rx.try_recv().unwrap(), true);
     }
 
     #[test]
-    fn cancel_all_clears_pending() {
+    fn reject_resolves_the_waiter_false() {
         let mut m = PairingManager::new();
-        m.start("s", "s name", "h", 1);
-        m.start("s", "s name", "h", 1);
-        assert_eq!(m.active_count(), 2);
-        m.cancel_all();
-        assert_eq!(m.active_count(), 0);
+        m.open_window();
+        let mut rx = m.request_approval("c1", "iPhone", "111 222").unwrap();
+        assert!(m.resolve("c1", false));
+        assert_eq!(rx.try_recv().unwrap(), false);
     }
 
     #[test]
-    fn tick_evicts_expired() {
+    fn resolving_unknown_client_is_false() {
         let mut m = PairingManager::new();
-        // Insert one entry that expired one second ago.
-        let id = "expired-id".to_string();
-        m.pending.insert(
-            id,
-            PendingPairing {
-                secret: vec![0; 32],
-                expires_at: Instant::now() - Duration::from_secs(1),
-            },
-        );
-        assert_eq!(m.active_count(), 1);
-        m.tick();
-        assert_eq!(m.active_count(), 0);
+        assert!(!m.resolve("nope", true));
     }
 
     #[test]
-    fn distinct_pairings_have_distinct_ids_and_secrets() {
+    fn closing_window_drops_waiters() {
         let mut m = PairingManager::new();
-        let a = m.start("s", "s", "h", 1);
-        let b = m.start("s", "s", "h", 1);
-        assert_ne!(a.pairing_id, b.pairing_id);
-        assert_ne!(a.secret_hex, b.secret_hex);
+        m.open_window();
+        let mut rx = m.request_approval("c1", "iPhone", "111 222").unwrap();
+        m.close_window();
+        assert!(!m.window_active());
+        // Sender dropped without sending -> receiver errors (treated as reject).
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn pending_requests_lists_waiting_phones() {
+        let mut m = PairingManager::new();
+        m.open_window();
+        let _rx = m.request_approval("c1", "Neha's iPhone", "123 456").unwrap();
+        let reqs = m.pending_requests();
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(reqs[0].client_id, "c1");
+        assert_eq!(reqs[0].client_name, "Neha's iPhone");
+        assert_eq!(reqs[0].sas, "123 456");
     }
 }

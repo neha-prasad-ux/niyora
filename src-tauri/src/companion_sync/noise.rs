@@ -206,6 +206,28 @@ fn finish(hs: HandshakeState) -> Result<Handshake, String> {
     })
 }
 
+/// Seal a plaintext into a Noise transport ciphertext (no I/O). Split out
+/// so the live select! loop can read a frame off one socket half and seal
+/// onto the other without holding a borrow across an await.
+pub fn seal(transport: &mut TransportState, plaintext: &[u8]) -> Result<Vec<u8>, String> {
+    let mut buf = vec![0u8; plaintext.len() + 16];
+    let n = transport
+        .write_message(plaintext, &mut buf)
+        .map_err(|e| format!("seal: {e}"))?;
+    buf.truncate(n);
+    Ok(buf)
+}
+
+/// Open a Noise transport ciphertext into its plaintext (no I/O).
+pub fn open(transport: &mut TransportState, ciphertext: &[u8]) -> Result<Vec<u8>, String> {
+    let mut buf = vec![0u8; ciphertext.len()];
+    let n = transport
+        .read_message(ciphertext, &mut buf)
+        .map_err(|e| format!("open: {e}"))?;
+    buf.truncate(n);
+    Ok(buf)
+}
+
 /// Seal one plaintext frame (an NDJSON app message) and write it framed.
 pub async fn send_encrypted<S>(
     stream: &mut S,
@@ -243,7 +265,9 @@ where
     Ok(buf)
 }
 
-async fn write_frame<W>(w: &mut W, payload: &[u8]) -> std::io::Result<()>
+/// Write a length-prefixed frame. Public so the live loop can frame sealed
+/// app messages onto the write half of a split socket.
+pub async fn write_frame<W>(w: &mut W, payload: &[u8]) -> std::io::Result<()>
 where
     W: AsyncWrite + Unpin,
 {
@@ -256,7 +280,9 @@ where
     Ok(())
 }
 
-async fn read_frame<R>(r: &mut R) -> std::io::Result<Vec<u8>>
+/// Read one length-prefixed frame. Public counterpart to `write_frame`;
+/// the live loop reads the ciphertext frame here, then `open`s it.
+pub async fn read_frame<R>(r: &mut R) -> std::io::Result<Vec<u8>>
 where
     R: AsyncRead + Unpin,
 {

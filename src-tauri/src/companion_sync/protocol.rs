@@ -1,52 +1,46 @@
-//! Wire protocol v3 between the Niyora Mac app and the Niyora Companion
-//! iPhone app. Each frame is one line of JSON over TCP (NDJSON). Every
-//! message carries a `type` discriminator. Unknown types are a fatal error
-//! and the connection is dropped, on the principle that a misaligned client
-//! is more dangerous than a disconnect.
+//! Wire protocol v4 between the Niyora Mac app and the Niyora Companion
+//! iPhone app. Every app message is one JSON object carrying a `type`
+//! discriminator. Unknown types are a fatal error and the connection is
+//! dropped, on the principle that a misaligned client is more dangerous
+//! than a disconnect.
+//!
+//! As of v4 the channel is wrapped in a Noise XX handshake (see
+//! `noise.rs`): app messages are sealed Noise transport frames, not
+//! plaintext NDJSON. The handshake replaces the old QR-secret + HMAC
+//! challenge entirely.
 //!
 //! Lifecycle from the phone's perspective:
 //!
 //! ```text
-//!   →  identify             {client_id, client_name, pairing_id?}
-//!   ←  hello                {server_id, server_name}
-//!   ←  challenge            {nonce_hex}
-//!   →  auth                 {hmac_hex}                  // HMAC-SHA256(secret, nonce)
+//!   [Noise XX handshake · 3 messages]
+//!   [both derive the SAS from the handshake hash]
+//!   →  identify             {protocol, client_id, client_name}
+//!   ←  hello                {protocol, server_id, server_name}
 //!   ←  authed   or   ← auth_failed (then close)
-//!   ←  status_update        {soul_tier, completed_sessions, current_tier, total_session_count}   (after authed)
-//!   ←  soul_state           {day_label, index}                     (after authed, v3+)
+//!   ←  status_update        {soul_tier, completed_sessions, current_tier, total_session_count}
+//!   ←  soul_state           {day_label, index}
 //!   ←  request_measurement  {session_id, phase, technique_name}   (zero or more per session)
-//!   →  session_recorded     {technique_name, duration_sec, completed, recorded_at}   (v3 only)
+//!   →  session_recorded     {technique_name, duration_sec, completed, recorded_at}
 //! ```
 //!
-//! `pairing_id` is only set on the first connect after a QR scan. The Mac
-//! holds the QR-issued secret and pairing_id in memory and binds them to
-//! the phone's `client_id` on receipt. Subsequent reconnects omit the
-//! `pairing_id` and auth via stored secret.
+//! Trust: a known phone (its static key matches the one the Mac stored at
+//! pairing) is reconnected silently. An unknown phone is paired only when
+//! the Mac user clicks Allow during an open pairing window, after both
+//! confirm the SAS matches. There is no `pairing_id` and no shared secret.
 //!
-//! v2 vs v1: the HealthKit-on-window auto-read path is gone. Sessions no
-//! longer auto-emit a window at end. Instead the user explicitly opts in
-//! to a 30s iPhone-camera PPG measurement via a "Measure stress" button,
-//! and the Mac emits one `request_measurement` per tap (phase = pre or
-//! post). The phone responds with `hrv_result` once it has computed RMSSD
-//! and SDNN from the green-channel pulse it captured.
-//!
-//! v3 vs v2: adds `session_recorded` (phone -> Mac) so the iOS companion
-//! can report completed breathing sessions for Soul tier progression.
-//! Also adds `status_update` (Mac -> phone) so paired mode can show the
-//! Mac's current Soul tier. v2 companions still connect and use HRV, but
-//! cannot send `session_recorded` or receive `status_update`.
+//! v4 vs v3: the transport is now Noise-sealed; the QR + HMAC auth path
+//! (`pairing_id` on identify, `challenge`/`auth` frames) is removed. v3 and
+//! earlier companions cannot speak v4 and must update.
 
 use serde::{Deserialize, Serialize};
 
-/// Wire-format protocol version. Bumped on any breaking shape change
-/// (renamed field, removed field, changed semantic). v3 adds
-/// `SessionRecorded` (phone -> Mac) and `StatusUpdate` (Mac -> phone).
-/// v2 companions are still accepted for HRV-only use.
-pub const PROTOCOL_VERSION: u32 = 3;
+/// Wire-format protocol version. v4 wraps the channel in Noise XX and drops
+/// the QR/HMAC handshake. Bumped on any breaking shape change.
+pub const PROTOCOL_VERSION: u32 = 4;
 
-/// Minimum protocol version accepted from companions. v2 clients can
-/// still send HRV results but cannot use session sync.
-pub const PROTOCOL_VERSION_MIN: u32 = 2;
+/// Minimum protocol version accepted from companions. v4 is a hard break
+/// from the plaintext + HMAC transport · pre-v4 clients cannot handshake.
+pub const PROTOCOL_VERSION_MIN: u32 = 4;
 
 fn default_technique_kind() -> String {
     "breathing".to_string()
@@ -59,21 +53,16 @@ fn default_technique_kind() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMessage {
-    /// First frame on every connection. `pairing_id` is present only when
-    /// the phone is using a fresh QR; on subsequent reconnects it is absent
-    /// and the Mac looks up the secret by `client_id`.
+    /// First sealed frame after the Noise handshake. The phone's identity is
+    /// the static key the handshake established; `client_id` is just a stable
+    /// handle for the Keychain entry, registry, and queue dedup. There is no
+    /// `pairing_id` and no secret.
     Identify {
         protocol: u32,
         client_id: String,
         client_name: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pairing_id: Option<String>,
     },
-    /// Phone's response to the server `challenge`. `hmac_hex` is the lower
-    /// case hex of `HMAC-SHA256(secret_bytes, nonce_bytes)` where the nonce
-    /// is decoded from the hex string the server sent.
-    Auth { hmac_hex: String },
-    /// A completed (or abandoned) session from the iOS companion (v3+).
+    /// A completed (or abandoned) session from the iOS companion.
     /// The Mac persists this to the session log and bumps Soul tier
     /// progression. v2 companions never send this.
     SessionRecorded {
@@ -148,9 +137,8 @@ pub enum ServerMessage {
         server_id: String,
         server_name: String,
     },
-    /// Server-issued nonce. Phone replies with `auth { hmac_hex }`.
-    Challenge { nonce_hex: String },
-    /// Auth succeeded. Window frames may now flow.
+    /// Pairing approved (fresh) or recognised (reconnect). App frames may
+    /// now flow.
     Authed,
     /// Auth failed. Connection will close after this frame.
     AuthFailed { reason: String },
@@ -195,42 +183,6 @@ pub enum ServerMessage {
     },
 }
 
-/// Payload encoded into the pairing QR code (base64 URL-safe, no padding).
-/// Single-use: the Mac invalidates `pairing_id` after the first successful
-/// HMAC verification, so a glimpsed QR cannot be reused.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct QrPayload {
-    pub v: u32,
-    pub server_id: String,
-    pub server_name: String,
-    pub host: String,
-    pub port: u16,
-    pub pairing_id: String,
-    pub secret_hex: String,
-}
-
-impl QrPayload {
-    /// Encode self as base64-url JSON for inclusion in a QR code. Returns
-    /// the string the iOS scanner decodes back into a `QrPayload`.
-    pub fn encode(&self) -> Result<String, String> {
-        use base64::Engine;
-        let json = serde_json::to_vec(self).map_err(|e| format!("qr encode: {e}"))?;
-        Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json))
-    }
-
-    /// Inverse of `encode`. Exposed (with `allow(dead_code)`) so the iOS
-    /// team has a single Rust reference for the QR string format and the
-    /// round-trip test below catches drift in either direction.
-    #[allow(dead_code)]
-    pub fn decode(s: &str) -> Result<Self, String> {
-        use base64::Engine;
-        let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(s)
-            .map_err(|e| format!("qr decode b64: {e}"))?;
-        serde_json::from_slice(&bytes).map_err(|e| format!("qr decode json: {e}"))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -241,23 +193,21 @@ mod tests {
             protocol: PROTOCOL_VERSION,
             client_id: "c-1".into(),
             client_name: "Neha's iPhone".into(),
-            pairing_id: Some("p-1".into()),
         };
         let s = serde_json::to_string(&m).unwrap();
         let v: serde_json::Value = serde_json::from_str(&s).unwrap();
         assert_eq!(v["type"], "identify");
         assert_eq!(v["client_id"], "c-1");
-        assert_eq!(v["pairing_id"], "p-1");
         assert_eq!(v["protocol"], PROTOCOL_VERSION);
     }
 
     #[test]
-    fn identify_without_pairing_id_omits_field() {
+    fn identify_carries_no_pairing_id() {
+        // v4 dropped the QR pairing_id; identity is the Noise static key.
         let m = ClientMessage::Identify {
             protocol: PROTOCOL_VERSION,
             client_id: "c-1".into(),
             client_name: "Neha's iPhone".into(),
-            pairing_id: None,
         };
         let s = serde_json::to_string(&m).unwrap();
         let v: serde_json::Value = serde_json::from_str(&s).unwrap();
@@ -271,9 +221,6 @@ mod tests {
                 protocol: PROTOCOL_VERSION,
                 server_id: "s-1".into(),
                 server_name: "Neha's MacBook".into(),
-            },
-            ServerMessage::Challenge {
-                nonce_hex: "deadbeef".into(),
             },
             ServerMessage::Authed,
             ServerMessage::AuthFailed {
@@ -499,21 +446,5 @@ mod tests {
         let s = serde_json::to_string(&m).unwrap();
         let back: ServerMessage = serde_json::from_str(&s).unwrap();
         assert_eq!(m, back);
-    }
-
-    #[test]
-    fn qr_payload_round_trips_through_base64() {
-        let p = QrPayload {
-            v: 1,
-            server_id: "s-1".into(),
-            server_name: "Neha's MacBook".into(),
-            host: "192.168.1.42".into(),
-            port: 51234,
-            pairing_id: "p-1".into(),
-            secret_hex: "00112233445566778899aabbccddeeff".into(),
-        };
-        let enc = p.encode().unwrap();
-        let dec = QrPayload::decode(&enc).unwrap();
-        assert_eq!(p, dec);
     }
 }
