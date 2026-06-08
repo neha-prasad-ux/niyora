@@ -354,6 +354,7 @@ interface AnimState {
   // label is drawn at (1 - labelT) and the current at labelT, so swaps
   // never read as a hard cut.
   shownLabel: string; prevLabel: string; labelT: number;
+  shownPromptIndex: number;
 }
 
 function createState(w: number, h: number, completedSessions?: number, forceBoxBreath?: boolean): AnimState {
@@ -372,6 +373,7 @@ function createState(w: number, h: number, completedSessions?: number, forceBoxB
     bgColor: [260, 15, 11], targetBgColor: [260, 15, 11],
     labelOpacity: 0, nameOpacity: 0, subtitleOpacity: 0,
     shownLabel: "", prevLabel: "", labelT: 1,
+    shownPromptIndex: -1,
   };
 }
 
@@ -490,6 +492,7 @@ export default function BreathingSession({ sessionId, onComplete, snapshot, comp
   // info screen is showing — stateRef.current.technique mutates, but React
   // needs a nudge to redraw the technique benefits / name.
   const [, setPickNonce] = useState(0);
+  const [announcedPhase, setAnnouncedPhase] = useState('');
   // Once the user picks a technique from "Try a different one", drop the
   // day-start framing and show the real technique name/subtitle.
   const [showDayStart, setShowDayStart] = useState(!!isFirstOpenToday);
@@ -712,6 +715,7 @@ export default function BreathingSession({ sessionId, onComplete, snapshot, comp
     fresh.shownLabel = prev.shownLabel;
     fresh.prevLabel = prev.prevLabel;
     fresh.labelT = prev.labelT;
+    fresh.shownPromptIndex = prev.shownPromptIndex;
     stateRef.current = fresh;
 
     let lastTime = performance.now();
@@ -798,6 +802,10 @@ export default function BreathingSession({ sessionId, onComplete, snapshot, comp
         const mt = technique as MindfulnessTechnique;
         const prompt = mt.prompts[s.promptIndex];
         currentPromptText = prompt.text;
+        if (s.promptIndex !== s.shownPromptIndex) {
+          s.shownPromptIndex = s.promptIndex;
+          setAnnouncedPhase(currentPromptText);
+        }
         s.promptTime += dt;
         // promptProgress used implicitly via s.promptTime / prompt.duration
 
@@ -1120,6 +1128,7 @@ export default function BreathingSession({ sessionId, onComplete, snapshot, comp
           s.prevLabel = s.shownLabel;
           s.shownLabel = currentLabel;
           s.labelT = 0;
+          setAnnouncedPhase(currentLabel);
         }
         if (s.labelT < 1) {
           s.labelT = Math.min(1, s.labelT + dt / LABEL_FADE_S);
@@ -1247,6 +1256,14 @@ export default function BreathingSession({ sessionId, onComplete, snapshot, comp
   return (
     <div style={{ width: WIDTH, height: HEIGHT, borderRadius: 16, overflow: "hidden", position: "relative", cursor: "default", userSelect: "none" }}>
       <canvas ref={canvasRef} onClick={togglePause} style={{ width: WIDTH, height: HEIGHT, display: "block", cursor: "pointer" }} />
+      <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap" }}
+      >
+        {announcedPhase}
+      </div>
       {/* Pause/resume icon — centered overlay, only visible during active practice. */}
       {!waiting && (
         <button
