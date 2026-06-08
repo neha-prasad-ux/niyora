@@ -405,6 +405,7 @@ impl CompanionSync {
                 completed_sessions: stats.completed,
                 current_tier: tier.to_string(),
                 total_session_count: stats.total,
+                native_completed_sessions: stats.native_completed,
             },
         )
         .await?;
@@ -422,6 +423,8 @@ impl CompanionSync {
             &ServerMessage::SoulState {
                 day_label: soul_label,
                 index: soul_index,
+                source: "mac".to_string(),
+                ts: now_rfc3339(),
             },
         )
         .await?;
@@ -550,6 +553,7 @@ impl CompanionSync {
                                     completed_sessions: stats.completed,
                                     current_tier: tier.to_string(),
                                     total_session_count: stats.total,
+                                    native_completed_sessions: stats.native_completed,
                                 },
                             )
                             .await
@@ -627,7 +631,12 @@ impl CompanionSync {
     /// Broadcast the current situational soul-state to all live authed peers.
     /// Called by the situational score loop when the day label changes.
     pub fn broadcast_soul_state(&self, day_label: String, index: u8) {
-        let _ = self.live_tx.send(ServerMessage::SoulState { day_label, index });
+        let _ = self.live_tx.send(ServerMessage::SoulState {
+            day_label,
+            index,
+            source: "mac".to_string(),
+            ts: now_rfc3339(),
+        });
     }
 
     async fn emit_state(&self) {

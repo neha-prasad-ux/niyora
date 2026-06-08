@@ -33,6 +33,7 @@ fn append_session_line(
     intended_duration_sec: u64,
     actual_duration_sec: u64,
     completed: bool,
+    source: &str,
 ) -> Result<(), String> {
     let entry = json!({
         "session_id": session_id,
@@ -42,6 +43,10 @@ fn append_session_line(
         "intended_duration_sec": intended_duration_sec,
         "actual_duration_sec": actual_duration_sec,
         "completed": completed,
+        // "native" = practiced on this Mac, "companion" = pushed from the
+        // paired iPhone. Lets the phone add the two devices' own counts
+        // without double-counting sessions it already synced here.
+        "source": source,
     });
     let line = entry.to_string();
     let mut f = OpenOptions::new()
@@ -84,6 +89,7 @@ pub fn record_session(
         intended_duration_sec,
         actual_duration_sec,
         completed,
+        "native",
     )?;
 
     // Anonymous opt-in telemetry. No-op unless the user opted in on the
@@ -130,6 +136,7 @@ pub fn record_companion_session(
         intended_duration_sec,
         actual_duration_sec,
         completed,
+        "companion",
     )
 }
 
@@ -140,13 +147,23 @@ pub fn record_companion_session(
 pub struct SessionStats {
     pub completed: u32,
     pub total: u32,
+    /// Completed sessions practiced on this Mac only (source != "companion").
+    /// The paired phone adds this to its own count so a unified total never
+    /// double-counts the sessions it already pushed here. Entries written
+    /// before the `source` field existed are treated as native.
+    pub native_completed: u32,
 }
 
 fn count_lines(path: &Path) -> SessionStats {
     let mut completed = 0u32;
     let mut total = 0u32;
+    let mut native_completed = 0u32;
     let Ok(file) = std::fs::File::open(path) else {
-        return SessionStats { completed, total };
+        return SessionStats {
+            completed,
+            total,
+            native_completed,
+        };
     };
     for line in BufReader::new(file).lines().map_while(Result::ok) {
         if line.trim().is_empty() {
@@ -156,10 +173,19 @@ fn count_lines(path: &Path) -> SessionStats {
         if let Ok(v) = serde_json::from_str::<Value>(&line) {
             if v.get("completed").and_then(|c| c.as_bool()).unwrap_or(false) {
                 completed = completed.saturating_add(1);
+                let is_companion =
+                    v.get("source").and_then(|s| s.as_str()) == Some("companion");
+                if !is_companion {
+                    native_completed = native_completed.saturating_add(1);
+                }
             }
         }
     }
-    SessionStats { completed, total }
+    SessionStats {
+        completed,
+        total,
+        native_completed,
+    }
 }
 
 /// Resolve the current Soul tier from completed session count. Mirrors
@@ -188,6 +214,7 @@ pub fn load_session_stats() -> SessionStats {
         return SessionStats {
             completed: 0,
             total: 0,
+            native_completed: 0,
         };
     };
     count_lines(&path)
@@ -215,6 +242,7 @@ pub fn get_session_stats() -> SessionStats {
         return SessionStats {
             completed: 0,
             total: 0,
+            native_completed: 0,
         };
     };
     count_lines(&path)
@@ -248,6 +276,7 @@ mod tests {
             64,
             64,
             true,
+            "native",
         )
         .expect("write should succeed");
 
@@ -261,6 +290,7 @@ mod tests {
         assert_eq!(parsed["intended_duration_sec"], 64);
         assert_eq!(parsed["actual_duration_sec"], 64);
         assert_eq!(parsed["completed"], true);
+        assert_eq!(parsed["source"], "native");
 
         fs::remove_file(&path).ok();
     }
@@ -270,9 +300,9 @@ mod tests {
         let path = temp_path("multi");
         let _ = fs::remove_file(&path);
 
-        append_session_line(&path, "id-1", "ts1", "Ujjayi", "breathing", 60, 60, true).unwrap();
-        append_session_line(&path, "id-2", "ts2", "Trataka", "mindfulness", 33, 12, false).unwrap();
-        append_session_line(&path, "id-3", "ts3", "4-7-8 Breath", "breathing", 76, 76, true).unwrap();
+        append_session_line(&path, "id-1", "ts1", "Ujjayi", "breathing", 60, 60, true, "native").unwrap();
+        append_session_line(&path, "id-2", "ts2", "Trataka", "mindfulness", 33, 12, false, "native").unwrap();
+        append_session_line(&path, "id-3", "ts3", "4-7-8 Breath", "breathing", 76, 76, true, "native").unwrap();
 
         let contents = fs::read_to_string(&path).unwrap();
         let lines: Vec<&str> = contents.lines().collect();
@@ -292,15 +322,32 @@ mod tests {
         let path = temp_path("counts");
         let _ = fs::remove_file(&path);
 
-        append_session_line(&path, "id-a", "ts1", "Box Breath", "breathing", 65, 65, true).unwrap();
-        append_session_line(&path, "id-b", "ts2", "Ujjayi", "breathing", 60, 12, false).unwrap();
-        append_session_line(&path, "id-c", "ts3", "Belly Breath", "breathing", 60, 60, true).unwrap();
-        append_session_line(&path, "id-d", "ts4", "Trataka", "mindfulness", 33, 5, false).unwrap();
+        append_session_line(&path, "id-a", "ts1", "Box Breath", "breathing", 65, 65, true, "native").unwrap();
+        append_session_line(&path, "id-b", "ts2", "Ujjayi", "breathing", 60, 12, false, "native").unwrap();
+        append_session_line(&path, "id-c", "ts3", "Belly Breath", "breathing", 60, 60, true, "companion").unwrap();
+        append_session_line(&path, "id-d", "ts4", "Trataka", "mindfulness", 33, 5, false, "native").unwrap();
 
         let stats = count_lines(&path);
         assert_eq!(stats.total, 4);
         assert_eq!(stats.completed, 2);
+        // id-a completed native, id-c completed companion -> native_completed = 1.
+        assert_eq!(stats.native_completed, 1);
 
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn count_lines_treats_missing_source_as_native() {
+        // Entries written before the `source` field existed must still count
+        // toward native_completed (they were all Mac-native).
+        let path = temp_path("legacy-source");
+        let _ = fs::remove_file(&path);
+        use std::io::Write;
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(f, r#"{{"completed":true,"technique_name":"Old"}}"#).unwrap();
+        let stats = count_lines(&path);
+        assert_eq!(stats.completed, 1);
+        assert_eq!(stats.native_completed, 1);
         fs::remove_file(&path).ok();
     }
 
@@ -327,6 +374,7 @@ mod tests {
             24,
             8,
             false,
+            "native",
         )
         .unwrap();
 
