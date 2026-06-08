@@ -29,17 +29,21 @@ tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2"
 cocoa = "0.26"
 objc = "0.2"
 mac-notification-sys = "0.6"
-# HRV companion sync (milestones 3-4): mDNS advertise, TCP push of session
-# windows, QR-based pairing with HMAC-SHA256 auth, queued send when no peer
-# is connected. macOS-only because HealthKit (the companion's reason to
-# exist) is Apple-only.
+# HRV companion sync: mDNS advertise, TCP push of session windows, queued
+# send when no peer is connected. macOS-only because HealthKit (the
+# companion's reason to exist) is Apple-only.
 mdns-sd = "0.11"
 tokio = { version = "1", features = ["net", "sync", "rt", "rt-multi-thread", "macros", "io-util", "time"] }
 security-framework = "3"
-hmac = "0.12"
-sha2 = "0.10"
+# Noise XX handshake for the iPhone pairing flow: one live key exchange gives
+# encryption-in-transit + mutual auth + a Short Authentication String (the
+# number both screens show). Replaces the old QR secret + HMAC-SHA256 auth.
+# Pure-Rust default resolver, no openssl. Suite
+# Noise_XX_25519_ChaChaPoly_SHA256 so the iOS side can implement it with
+# CryptoKit (Curve25519 + ChaChaPoly + SHA256) directly.
+snow = "0.9"
+# qrcode stays for onboarding (not pairing).
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
-base64 = "0.22"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 tauri-plugin-single-instance = "2"

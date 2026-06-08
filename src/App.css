@@ -1542,27 +1542,51 @@ html, body, #root {
   font-weight: 500;
   color: rgba(255, 255, 255, 0.95);
 }
-.companion-modal-steps {
-  font-size: 11px;
+.companion-modal-sub {
+  font-size: 11.5px;
   font-weight: 300;
-  color: rgba(255, 255, 255, 0.65);
+  color: rgba(255, 255, 255, 0.6);
   line-height: 1.5;
-  margin: 0;
-  padding-left: 18px;
-  align-self: stretch;
+  text-align: center;
 }
-.companion-qr {
-  background: #fff;
-  padding: 10px;
-  border-radius: 10px;
+.companion-sas {
+  font-size: 40px;
+  font-weight: 300;
+  letter-spacing: 0.12em;
+  color: rgba(255, 255, 255, 0.96);
+  font-variant-numeric: tabular-nums;
+  padding: 6px 0 2px;
+}
+.companion-modal-actions {
   display: flex;
   align-items: center;
+  gap: 10px;
+  align-self: stretch;
   justify-content: center;
 }
-.companion-qr svg {
-  display: block;
-  width: 220px;
-  height: 220px;
+.companion-modal-actions .soul-cta-btn {
+  width: auto;
+  padding-left: 28px;
+  padding-right: 28px;
+}
+.companion-searching {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.7);
+}
+.companion-searching-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(150, 200, 255, 0.9);
+  animation: companion-pulse 1.4s ease-in-out infinite;
+}
+@keyframes companion-pulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.1); }
 }
 .companion-modal-timer {
   font-size: 11px;

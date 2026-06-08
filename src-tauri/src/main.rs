@@ -314,6 +314,10 @@ fn main() {
             #[cfg(target_os = "macos")]
             companion_sync::commands::companion_start_pairing,
             #[cfg(target_os = "macos")]
+            companion_sync::commands::companion_approve_pairing,
+            #[cfg(target_os = "macos")]
+            companion_sync::commands::companion_reject_pairing,
+            #[cfg(target_os = "macos")]
             companion_sync::commands::companion_cancel_pairing,
             #[cfg(target_os = "macos")]
             companion_sync::commands::companion_unpair,
