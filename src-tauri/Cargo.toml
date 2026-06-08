@@ -40,6 +40,12 @@ hmac = "0.12"
 sha2 = "0.10"
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 base64 = "0.22"
+# Noise XX handshake for the iPhone pairing rework: one live key exchange
+# gives encryption-in-transit + mutual auth + a Short Authentication String
+# (the number both screens show). Pure-Rust default resolver, no openssl.
+# Suite Noise_XX_25519_ChaChaPoly_SHA256 so the iOS side can implement it
+# with CryptoKit (Curve25519 + ChaChaPoly + SHA256) directly.
+snow = "0.9"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 tauri-plugin-single-instance = "2"

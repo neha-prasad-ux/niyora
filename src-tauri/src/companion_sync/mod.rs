@@ -23,6 +23,8 @@ pub mod history;
 #[cfg(target_os = "macos")]
 pub mod keychain;
 #[cfg(target_os = "macos")]
+pub mod noise;
+#[cfg(target_os = "macos")]
 pub mod pairing;
 #[cfg(target_os = "macos")]
 pub mod protocol;
