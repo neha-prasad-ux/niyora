@@ -157,6 +157,12 @@ pub enum ServerMessage {
         completed_sessions: u32,
         current_tier: String,
         total_session_count: u32,
+        /// Completed sessions practiced on this Mac only (excludes ones the
+        /// phone pushed here). The phone adds this to its own count for a
+        /// unified total without double-counting. Additive field · older
+        /// companions ignore it.
+        #[serde(default)]
+        native_completed_sessions: u32,
     },
     /// Tells the phone to start a 30s PPG capture for one side of a
     /// session. The Mac emits these only when the user taps "Measure
@@ -180,6 +186,14 @@ pub enum ServerMessage {
         day_label: String,
         /// Niyora Index 0-100. Higher = calmer day.
         index: u8,
+        /// Who produced the reading. Always `"mac"` for now · the phone uses
+        /// it to attribute the source once it can sense its own stress.
+        #[serde(default)]
+        source: String,
+        /// RFC3339 timestamp of when this reading was sent. The phone uses it
+        /// to drop stale readings (it only shows a recent one).
+        #[serde(default)]
+        ts: String,
     },
 }
 
@@ -231,10 +245,13 @@ mod tests {
                 completed_sessions: 7,
                 current_tier: "glow".into(),
                 total_session_count: 9,
+                native_completed_sessions: 6,
             },
             ServerMessage::SoulState {
                 day_label: "dense".into(),
                 index: 42,
+                source: "mac".into(),
+                ts: "2026-06-08T12:00:00Z".into(),
             },
             ServerMessage::RequestMeasurement {
                 session_id: "sess-1".into(),
@@ -394,12 +411,14 @@ mod tests {
             completed_sessions: 42,
             current_tier: "radiance".into(),
             total_session_count: 45,
+            native_completed_sessions: 30,
         };
         let s = serde_json::to_string(&m).unwrap();
         let v: serde_json::Value = serde_json::from_str(&s).unwrap();
         assert_eq!(v["type"], "status_update");
         assert_eq!(v["soul_tier"], "radiance");
         assert_eq!(v["completed_sessions"], 42);
+        assert_eq!(v["native_completed_sessions"], 30);
     }
 
     #[test]
@@ -413,6 +432,7 @@ mod tests {
             completed_sessions: 17,
             current_tier: "shine".into(),
             total_session_count: 20,
+            native_completed_sessions: 12,
         };
         let s = serde_json::to_string(&m).unwrap();
         let v: serde_json::Value = serde_json::from_str(&s).unwrap();
@@ -429,12 +449,16 @@ mod tests {
         let m = ServerMessage::SoulState {
             day_label: "dense".into(),
             index: 42,
+            source: "mac".into(),
+            ts: "2026-06-08T12:00:00Z".into(),
         };
         let s = serde_json::to_string(&m).unwrap();
         let v: serde_json::Value = serde_json::from_str(&s).unwrap();
         assert_eq!(v["type"], "soul_state");
         assert_eq!(v["day_label"], "dense");
         assert_eq!(v["index"], 42);
+        assert_eq!(v["source"], "mac");
+        assert_eq!(v["ts"], "2026-06-08T12:00:00Z");
     }
 
     #[test]
@@ -442,6 +466,8 @@ mod tests {
         let m = ServerMessage::SoulState {
             day_label: "heavy".into(),
             index: 15,
+            source: "mac".into(),
+            ts: "2026-06-08T12:00:00Z".into(),
         };
         let s = serde_json::to_string(&m).unwrap();
         let back: ServerMessage = serde_json::from_str(&s).unwrap();
