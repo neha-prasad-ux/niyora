@@ -4,9 +4,11 @@ import { invoke } from "@tauri-apps/api/core";
 export interface SessionStats {
   completed: number;
   total: number;
+  today_count: number;
+  current_streak: number;
 }
 
-const ZERO: SessionStats = { completed: 0, total: 0 };
+const ZERO: SessionStats = { completed: 0, total: 0, today_count: 0, current_streak: 0 };
 
 /**
  * Fetches the user's lifetime session counts from the local sessions.jsonl.

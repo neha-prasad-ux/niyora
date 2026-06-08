@@ -224,6 +224,19 @@ export default function Settings({ onBack, onOpenPss4 }: Props) {
             <span className="soul-sessions-label">sessions</span>
           </div>
 
+          {liveStats.current_streak > 0 && (
+            <div className="soul-sessions-row">
+              <span className="soul-sessions-num" style={{ color: `hsla(${accentHue}, 70%, 75%, 1)` }}>
+                {liveStats.current_streak}
+              </span>
+              <span className="soul-sessions-label">day streak</span>
+              <span className="soul-sessions-num" style={{ color: `hsla(${accentHue}, 60%, 70%, 0.8)`, marginLeft: 10 }}>
+                {liveStats.today_count}
+              </span>
+              <span className="soul-sessions-label">today</span>
+            </div>
+          )}
+
           <div className="soul-tier-track">
             <div
               className="soul-tier-track-fill"

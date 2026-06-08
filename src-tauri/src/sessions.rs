@@ -1,7 +1,9 @@
+use std::collections::BTreeSet;
 use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 
+use chrono::NaiveDate;
 use serde::Serialize;
 use serde_json::{json, Value};
 
@@ -140,13 +142,22 @@ pub fn record_companion_session(
 pub struct SessionStats {
     pub completed: u32,
     pub total: u32,
+    pub today_count: u32,
+    pub current_streak: u32,
 }
 
 fn count_lines(path: &Path) -> SessionStats {
+    count_lines_for_date(path, chrono::Local::now().date_naive())
+}
+
+fn count_lines_for_date(path: &Path, today: NaiveDate) -> SessionStats {
     let mut completed = 0u32;
     let mut total = 0u32;
+    let mut today_count = 0u32;
+    let mut completed_dates: BTreeSet<NaiveDate> = BTreeSet::new();
+
     let Ok(file) = std::fs::File::open(path) else {
-        return SessionStats { completed, total };
+        return SessionStats { completed, total, today_count, current_streak: 0 };
     };
     for line in BufReader::new(file).lines().map_while(Result::ok) {
         if line.trim().is_empty() {
@@ -156,10 +167,50 @@ fn count_lines(path: &Path) -> SessionStats {
         if let Ok(v) = serde_json::from_str::<Value>(&line) {
             if v.get("completed").and_then(|c| c.as_bool()).unwrap_or(false) {
                 completed = completed.saturating_add(1);
+                if let Some(ts) = v.get("started_at").and_then(|s| s.as_str()) {
+                    if ts.len() >= 10 {
+                        if let Ok(date) = NaiveDate::parse_from_str(&ts[..10], "%Y-%m-%d") {
+                            if date == today {
+                                today_count = today_count.saturating_add(1);
+                            }
+                            completed_dates.insert(date);
+                        }
+                    }
+                }
             }
         }
     }
-    SessionStats { completed, total }
+
+    let current_streak = compute_streak(&completed_dates, today);
+    SessionStats { completed, total, today_count, current_streak }
+}
+
+/// Count consecutive calendar days ending at today (or yesterday when today
+/// has no completed session). Dates must carry at least one completed session.
+fn compute_streak(dates: &BTreeSet<NaiveDate>, today: NaiveDate) -> u32 {
+    if dates.is_empty() {
+        return 0;
+    }
+    let start = if dates.contains(&today) {
+        today
+    } else {
+        let Some(yesterday) = today.pred_opt() else { return 0; };
+        if dates.contains(&yesterday) { yesterday } else { return 0; }
+    };
+    let mut streak = 0u32;
+    let mut day = start;
+    loop {
+        if dates.contains(&day) {
+            streak = streak.saturating_add(1);
+            match day.pred_opt() {
+                Some(prev) => day = prev,
+                None => break,
+            }
+        } else {
+            break;
+        }
+    }
+    streak
 }
 
 /// Resolve the current Soul tier from completed session count. Mirrors
@@ -185,10 +236,7 @@ pub fn current_soul_tier(completed: u32) -> &'static str {
 /// populate the StatusUpdate message.
 pub fn load_session_stats() -> SessionStats {
     let Some(path) = sessions_path() else {
-        return SessionStats {
-            completed: 0,
-            total: 0,
-        };
+        return SessionStats { completed: 0, total: 0, today_count: 0, current_streak: 0 };
     };
     count_lines(&path)
 }
@@ -212,10 +260,7 @@ pub fn reset_sessions() -> Result<(), String> {
 #[tauri::command]
 pub fn get_session_stats() -> SessionStats {
     let Some(path) = sessions_path() else {
-        return SessionStats {
-            completed: 0,
-            total: 0,
-        };
+        return SessionStats { completed: 0, total: 0, today_count: 0, current_streak: 0 };
     };
     count_lines(&path)
 }
@@ -388,5 +433,46 @@ mod tests {
             err.contains("unknown technique_kind"),
             "expected 'unknown technique_kind' in error, got: {err}"
         );
+    }
+
+    #[test]
+    fn streak_and_today_count_four_consecutive_days_including_today() {
+        let path = temp_path("streak4");
+        let _ = fs::remove_file(&path);
+
+        let today = NaiveDate::from_ymd_opt(2026, 6, 8).unwrap();
+
+        append_session_line(&path, "s1", "2026-06-05T10:00:00Z", "Box Breath", "breathing", 60, 60, true).unwrap();
+        append_session_line(&path, "s2", "2026-06-06T10:00:00Z", "Ujjayi", "breathing", 60, 60, true).unwrap();
+        append_session_line(&path, "s3", "2026-06-07T10:00:00Z", "4-7-8 Breath", "breathing", 60, 60, true).unwrap();
+        // Two completed sessions today + one abandoned (should not count)
+        append_session_line(&path, "s4", "2026-06-08T09:00:00Z", "Box Breath", "breathing", 60, 60, true).unwrap();
+        append_session_line(&path, "s5", "2026-06-08T11:00:00Z", "Ujjayi", "breathing", 60, 60, true).unwrap();
+        append_session_line(&path, "s6", "2026-06-08T15:00:00Z", "Trataka", "mindfulness", 30, 5, false).unwrap();
+
+        let stats = count_lines_for_date(&path, today);
+        assert_eq!(stats.current_streak, 4, "four consecutive days including today");
+        assert_eq!(stats.today_count, 2, "two completed sessions today");
+
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn streak_computed_from_yesterday_when_no_session_today() {
+        let path = temp_path("streak-yesterday");
+        let _ = fs::remove_file(&path);
+
+        let today = NaiveDate::from_ymd_opt(2026, 6, 8).unwrap();
+
+        append_session_line(&path, "s1", "2026-06-05T10:00:00Z", "Box Breath", "breathing", 60, 60, true).unwrap();
+        append_session_line(&path, "s2", "2026-06-06T10:00:00Z", "Ujjayi", "breathing", 60, 60, true).unwrap();
+        append_session_line(&path, "s3", "2026-06-07T10:00:00Z", "4-7-8 Breath", "breathing", 60, 60, true).unwrap();
+        // No session on 2026-06-08 (today).
+
+        let stats = count_lines_for_date(&path, today);
+        assert_eq!(stats.current_streak, 3, "three-day streak ending yesterday");
+        assert_eq!(stats.today_count, 0, "no sessions today");
+
+        fs::remove_file(&path).ok();
     }
 }
