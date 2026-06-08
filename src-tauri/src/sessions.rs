@@ -33,6 +33,7 @@ fn append_session_line(
     intended_duration_sec: u64,
     actual_duration_sec: u64,
     completed: bool,
+    source: &str,
 ) -> Result<(), String> {
     let entry = json!({
         "session_id": session_id,
@@ -42,6 +43,7 @@ fn append_session_line(
         "intended_duration_sec": intended_duration_sec,
         "actual_duration_sec": actual_duration_sec,
         "completed": completed,
+        "source": source,
     });
     let line = entry.to_string();
     let mut f = OpenOptions::new()
@@ -84,6 +86,7 @@ pub fn record_session(
         intended_duration_sec,
         actual_duration_sec,
         completed,
+        "mac",
     )?;
 
     // Anonymous opt-in telemetry. No-op unless the user opted in on the
@@ -130,23 +133,33 @@ pub fn record_companion_session(
         intended_duration_sec,
         actual_duration_sec,
         completed,
+        "companion",
     )
 }
 
 /// Aggregate session stats for the My Soul panel.
 /// Only completed sessions count toward `completed` — abandoned sessions
 /// are recorded but don't progress the user's tier.
+/// `mac_native_*` exclude sessions that arrived via companion sync so the phone
+/// can show a "Your Mac" box alongside its own "This iPhone" box without
+/// double-counting sessions the Mac already received from the phone.
+/// Entries written before companion sync (no `source` field) are treated as
+/// mac-native because they predate the companion feature.
 #[derive(Serialize)]
 pub struct SessionStats {
     pub completed: u32,
     pub total: u32,
+    pub mac_native_completed: u32,
+    pub mac_native_total: u32,
 }
 
 fn count_lines(path: &Path) -> SessionStats {
     let mut completed = 0u32;
     let mut total = 0u32;
+    let mut mac_native_completed = 0u32;
+    let mut mac_native_total = 0u32;
     let Ok(file) = std::fs::File::open(path) else {
-        return SessionStats { completed, total };
+        return SessionStats { completed, total, mac_native_completed, mac_native_total };
     };
     for line in BufReader::new(file).lines().map_while(Result::ok) {
         if line.trim().is_empty() {
@@ -154,12 +167,21 @@ fn count_lines(path: &Path) -> SessionStats {
         }
         total = total.saturating_add(1);
         if let Ok(v) = serde_json::from_str::<Value>(&line) {
-            if v.get("completed").and_then(|c| c.as_bool()).unwrap_or(false) {
+            let is_completed = v.get("completed").and_then(|c| c.as_bool()).unwrap_or(false);
+            if is_completed {
                 completed = completed.saturating_add(1);
+            }
+            // Entries without "source" predate companion sync and are mac-native.
+            let source = v.get("source").and_then(|s| s.as_str()).unwrap_or("mac");
+            if source != "companion" {
+                mac_native_total = mac_native_total.saturating_add(1);
+                if is_completed {
+                    mac_native_completed = mac_native_completed.saturating_add(1);
+                }
             }
         }
     }
-    SessionStats { completed, total }
+    SessionStats { completed, total, mac_native_completed, mac_native_total }
 }
 
 /// Resolve the current Soul tier from completed session count. Mirrors
@@ -188,6 +210,8 @@ pub fn load_session_stats() -> SessionStats {
         return SessionStats {
             completed: 0,
             total: 0,
+            mac_native_completed: 0,
+            mac_native_total: 0,
         };
     };
     count_lines(&path)
@@ -215,6 +239,8 @@ pub fn get_session_stats() -> SessionStats {
         return SessionStats {
             completed: 0,
             total: 0,
+            mac_native_completed: 0,
+            mac_native_total: 0,
         };
     };
     count_lines(&path)
@@ -248,6 +274,7 @@ mod tests {
             64,
             64,
             true,
+            "mac",
         )
         .expect("write should succeed");
 
@@ -270,9 +297,9 @@ mod tests {
         let path = temp_path("multi");
         let _ = fs::remove_file(&path);
 
-        append_session_line(&path, "id-1", "ts1", "Ujjayi", "breathing", 60, 60, true).unwrap();
-        append_session_line(&path, "id-2", "ts2", "Trataka", "mindfulness", 33, 12, false).unwrap();
-        append_session_line(&path, "id-3", "ts3", "4-7-8 Breath", "breathing", 76, 76, true).unwrap();
+        append_session_line(&path, "id-1", "ts1", "Ujjayi", "breathing", 60, 60, true, "mac").unwrap();
+        append_session_line(&path, "id-2", "ts2", "Trataka", "mindfulness", 33, 12, false, "mac").unwrap();
+        append_session_line(&path, "id-3", "ts3", "4-7-8 Breath", "breathing", 76, 76, true, "mac").unwrap();
 
         let contents = fs::read_to_string(&path).unwrap();
         let lines: Vec<&str> = contents.lines().collect();
@@ -292,14 +319,16 @@ mod tests {
         let path = temp_path("counts");
         let _ = fs::remove_file(&path);
 
-        append_session_line(&path, "id-a", "ts1", "Box Breath", "breathing", 65, 65, true).unwrap();
-        append_session_line(&path, "id-b", "ts2", "Ujjayi", "breathing", 60, 12, false).unwrap();
-        append_session_line(&path, "id-c", "ts3", "Belly Breath", "breathing", 60, 60, true).unwrap();
-        append_session_line(&path, "id-d", "ts4", "Trataka", "mindfulness", 33, 5, false).unwrap();
+        append_session_line(&path, "id-a", "ts1", "Box Breath", "breathing", 65, 65, true, "mac").unwrap();
+        append_session_line(&path, "id-b", "ts2", "Ujjayi", "breathing", 60, 12, false, "mac").unwrap();
+        append_session_line(&path, "id-c", "ts3", "Belly Breath", "breathing", 60, 60, true, "companion").unwrap();
+        append_session_line(&path, "id-d", "ts4", "Trataka", "mindfulness", 33, 5, false, "companion").unwrap();
 
         let stats = count_lines(&path);
         assert_eq!(stats.total, 4);
         assert_eq!(stats.completed, 2);
+        assert_eq!(stats.mac_native_total, 2);
+        assert_eq!(stats.mac_native_completed, 1);
 
         fs::remove_file(&path).ok();
     }
@@ -311,6 +340,27 @@ mod tests {
         let stats = count_lines(&path);
         assert_eq!(stats.total, 0);
         assert_eq!(stats.completed, 0);
+        assert_eq!(stats.mac_native_total, 0);
+        assert_eq!(stats.mac_native_completed, 0);
+    }
+
+    #[test]
+    fn legacy_entries_without_source_are_mac_native() {
+        // Entries written before companion sync have no "source" field.
+        // They must count as mac-native so existing users' session histories
+        // are not zeroed out when the phone asks for "Your Mac" counts.
+        let path = temp_path("legacy");
+        let _ = fs::remove_file(&path);
+        let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path).unwrap();
+        writeln!(f, r#"{{"session_id":"l1","started_at":"ts","technique_name":"Box","technique_kind":"breathing","intended_duration_sec":60,"actual_duration_sec":60,"completed":true}}"#).unwrap();
+        writeln!(f, r#"{{"session_id":"l2","started_at":"ts","technique_name":"Box","technique_kind":"breathing","intended_duration_sec":60,"actual_duration_sec":10,"completed":false}}"#).unwrap();
+        drop(f);
+        let stats = count_lines(&path);
+        assert_eq!(stats.total, 2);
+        assert_eq!(stats.completed, 1);
+        assert_eq!(stats.mac_native_total, 2, "legacy entries must be mac-native");
+        assert_eq!(stats.mac_native_completed, 1);
+        fs::remove_file(&path).ok();
     }
 
     #[test]
@@ -327,6 +377,7 @@ mod tests {
             24,
             8,
             false,
+            "mac",
         )
         .unwrap();
 
