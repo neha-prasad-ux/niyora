@@ -120,7 +120,7 @@ fn pick_message(s: &SituationalState) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::compute_interval;
+    use super::{compute_index, compute_interval, label_from_index, recompute, DayLabel};
     use crate::situational::SituationalState;
 
     // Tests assert relative ordering rather than exact values so they survive
@@ -187,6 +187,75 @@ mod tests {
         assert!(
             compute_interval(&s_compound) < compute_interval(&s_base),
             "after_hours + 70-min focus should fire sooner than after_hours alone"
+        );
+    }
+
+    #[test]
+    fn label_from_index_covers_all_bands() {
+        assert!(matches!(label_from_index(100), DayLabel::Calm));
+        assert!(matches!(label_from_index(80), DayLabel::Calm));
+        assert!(matches!(label_from_index(79), DayLabel::Normal));
+        assert!(matches!(label_from_index(60), DayLabel::Normal));
+        assert!(matches!(label_from_index(59), DayLabel::Dense));
+        assert!(matches!(label_from_index(40), DayLabel::Dense));
+        assert!(matches!(label_from_index(39), DayLabel::Heavy));
+        assert!(matches!(label_from_index(0), DayLabel::Heavy));
+    }
+
+    #[test]
+    fn compute_index_idle_state_scores_near_100() {
+        let s = SituationalState::new();
+        let score = compute_index(&s);
+        assert!(score >= 90, "idle state should score >= 90, got {score}");
+    }
+
+    #[test]
+    fn compute_index_max_load_scores_low() {
+        let mut s = SituationalState::new();
+        s.continuous_screen_min = 200;          // saturates at 120 cap
+        s.cumulative_meeting_min_today = 400;   // saturates at 360 cap
+        s.back_to_back_count = 5;               // saturates at 3 cap
+        s.app_switches_last_30min = 50;         // saturates at 40 cap
+        s.keystrokes_per_min = 300;             // saturates at 250 cap
+        s.after_hours = true;
+        let score = compute_index(&s);
+        assert!(score <= 10, "max-load state should score <= 10, got {score}");
+    }
+
+    #[test]
+    fn recompute_sets_all_computed_fields() {
+        let mut s = SituationalState::new();
+        s.continuous_screen_min = 150;
+        recompute(&mut s);
+        assert!(s.niyora_index <= 100);
+        assert!(s.current_interval_min >= 40 && s.current_interval_min <= 120);
+        assert!(!s.contextual_message.is_empty());
+        // day_label must agree with the freshly computed index.
+        let expected = label_from_index(s.niyora_index);
+        assert_eq!(s.day_label.as_str(), expected.as_str());
+    }
+
+    #[test]
+    fn recompute_picks_screen_time_message_when_dominant() {
+        let mut s = SituationalState::new();
+        s.continuous_screen_min = 120; // saturates the 0.25-weight screen term; all others 0
+        recompute(&mut s);
+        assert!(
+            s.contextual_message.contains("screen"),
+            "expected screen-time contextual message, got: {}",
+            s.contextual_message
+        );
+    }
+
+    #[test]
+    fn recompute_picks_after_hours_message_when_dominant() {
+        let mut s = SituationalState::new();
+        s.after_hours = true; // 0.10 weight, all other signals zero
+        recompute(&mut s);
+        assert!(
+            s.contextual_message.contains("late"),
+            "expected after-hours contextual message, got: {}",
+            s.contextual_message
         );
     }
 }
