@@ -48,24 +48,26 @@ fn mark_pss4_done() -> Result<(), String> {
     config::save(&cfg)
 }
 
+fn is_today_sunday(weekday: Weekday) -> bool {
+    weekday == Weekday::Sun
+}
+
 /// Returns true if the panel should auto-prompt the PSS-4 right now:
 /// today is Sunday AND the user hasn't completed/dismissed it today.
 #[tauri::command]
 pub fn should_show_pss4() -> bool {
     let today = chrono::Local::now();
-    if today.weekday() != Weekday::Sun {
+    if !is_today_sunday(today.weekday()) {
         return false;
     }
     let cfg = config::load();
     cfg.last_pss4_date != Some(today_iso())
 }
 
-/// Score a PSS-4 submission and log it. `answers` is a 4-element array of
-/// 0..=4 responses on the Never→Very Often scale. Items 2 and 3 are
+/// Pure scoring logic for PSS-4. Items 2 and 3 (0-indexed: 1 and 2) are
 /// positively-worded and reverse-scored per the validated instrument.
 /// Returns total 0..=16 (higher = more perceived stress).
-#[tauri::command]
-pub fn submit_pss4(answers: Vec<u8>) -> Result<u8, String> {
+fn score_pss4(answers: &[u8]) -> Result<u8, String> {
     if answers.len() != 4 {
         return Err("PSS-4 requires exactly 4 answers".to_string());
     }
@@ -74,8 +76,14 @@ pub fn submit_pss4(answers: Vec<u8>) -> Result<u8, String> {
     let q2 = 4 - clip(answers[1]); // reverse
     let q3 = 4 - clip(answers[2]); // reverse
     let q4 = clip(answers[3]);
-    let total = q1 + q2 + q3 + q4;
+    Ok(q1 + q2 + q3 + q4)
+}
 
+/// Score a PSS-4 submission and log it. `answers` is a 4-element array of
+/// 0..=4 responses on the Never→Very Often scale.
+#[tauri::command]
+pub fn submit_pss4(answers: Vec<u8>) -> Result<u8, String> {
+    let total = score_pss4(&answers)?;
     append_event(
         "pss4",
         json!({
@@ -104,7 +112,7 @@ pub struct Pss4Entry {
 }
 
 /// Read all PSS-4 scores recorded in events.jsonl, ordered oldest → newest.
-/// Used by the My Soul panel to draw a comparison sparkline so the test has
+/// Used by the My Soul panel to draw a comparison sparkline so the score has
 /// value beyond the moment-of-completion.
 #[tauri::command]
 pub fn pss4_history() -> Vec<Pss4Entry> {
@@ -139,4 +147,51 @@ pub fn pss4_history() -> Vec<Pss4Entry> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Weekday;
+
+    // --- score_pss4 ---
+
+    #[test]
+    fn score_pss4_minimum() {
+        // Forward items at 0, reverse items at 4: each contributes 0.
+        assert_eq!(score_pss4(&[0, 4, 4, 0]), Ok(0));
+    }
+
+    #[test]
+    fn score_pss4_maximum() {
+        // Forward items at 4, reverse items at 0: each contributes 4.
+        assert_eq!(score_pss4(&[4, 0, 0, 4]), Ok(16));
+    }
+
+    #[test]
+    fn score_pss4_mixed() {
+        // 1 + (4-2) + (4-3) + 0 = 1 + 2 + 1 + 0 = 4
+        assert_eq!(score_pss4(&[1, 2, 3, 0]), Ok(4));
+    }
+
+    #[test]
+    fn score_pss4_wrong_length() {
+        assert!(score_pss4(&[]).is_err());
+        assert!(score_pss4(&[1, 2, 3]).is_err());
+        assert!(score_pss4(&[1, 2, 3, 4, 5]).is_err());
+    }
+
+    // --- is_today_sunday ---
+
+    #[test]
+    fn is_today_sunday_false_for_non_sunday() {
+        assert!(!is_today_sunday(Weekday::Mon));
+        assert!(!is_today_sunday(Weekday::Fri));
+        assert!(!is_today_sunday(Weekday::Sat));
+    }
+
+    #[test]
+    fn is_today_sunday_true_for_sunday() {
+        assert!(is_today_sunday(Weekday::Sun));
+    }
 }
