@@ -98,3 +98,40 @@ describe("randomTechnique", () => {
     }
   });
 });
+
+describe("technique instruction content", () => {
+  it("Box Breath instruction carries the nasal cue", () => {
+    const box = breathingList.find((t) => t.name === "Box Breath")!;
+    expect(box.instructions).toMatch(/Breathe through your nose/);
+  });
+
+  it("Belly Breath instruction carries the nasal cue", () => {
+    const belly = breathingList.find((t) => t.name === "Belly Breath")!;
+    expect(belly.instructions).toMatch(/Breathe through your nose/);
+  });
+
+  it("every technique has a non-empty instructions string", () => {
+    for (const t of techniques) {
+      expect(t.instructions.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("Box Breath phase structure", () => {
+  it("has exactly 4 phases", () => {
+    const box = breathingList.find((t) => t.name === "Box Breath")!;
+    expect(box.phases).toHaveLength(4);
+  });
+
+  it("all phases have equal duration of 4s", () => {
+    const box = breathingList.find((t) => t.name === "Box Breath")!;
+    for (const phase of box.phases) {
+      expect(phase.duration).toBe(4);
+    }
+  });
+
+  it("phase sequence is inhale-hold-exhale-hold", () => {
+    const box = breathingList.find((t) => t.name === "Box Breath")!;
+    expect(box.phases.map((p) => p.type)).toEqual(["inhale", "hold", "exhale", "hold"]);
+  });
+});
