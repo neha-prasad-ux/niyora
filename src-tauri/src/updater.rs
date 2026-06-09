@@ -82,7 +82,7 @@ async fn run_one_check(app: &AppHandle) {
             // 100MB install. Metered-network detection is a known gap (see
             // privacy contract above); platform-specific NWPathMonitor /
             // Windows NetworkInformation integration is tracked separately.
-            let progress = |downloaded: u64, total: Option<u64>| {
+            let progress = |downloaded: usize, total: Option<u64>| {
                 if let Some(total) = total.filter(|&t| t > 0) {
                     let curr_pct = (downloaded as f64 / total as f64 * 100.0) as u32;
                     let prev = downloaded.saturating_sub(1);
