@@ -181,6 +181,28 @@ mod tests {
         assert!(score_pss4(&[1, 2, 3, 4, 5]).is_err());
     }
 
+    #[test]
+    fn score_pss4_clips_out_of_range_answers() {
+        // Answers > 4 are silently clipped to 4. Without clipping,
+        // `4 - 5_u8` would panic in debug mode (u8 underflow) on the
+        // reverse-scored items. The clip is the safety contract.
+        // Forward items at 5 behave identically to 4.
+        assert_eq!(score_pss4(&[5, 0, 0, 5]), Ok(16)); // clip(5)+4+4+clip(5)
+        // Reverse items at 5: 4-clip(5)=0 → max perceived-high-stress.
+        assert_eq!(score_pss4(&[0, 5, 5, 0]), Ok(0));  // 0+(4-4)+(4-4)+0
+        // u8::MAX clips without wrapping.
+        assert_eq!(score_pss4(&[255, 0, 0, 255]), Ok(16));
+    }
+
+    #[test]
+    fn score_pss4_all_zeros_produces_8_not_0() {
+        // Answering "Never" (0) to every question is NOT minimum stress.
+        // Items 2 and 3 are reverse-scored, so "Never felt confident" and
+        // "Never felt things were going your way" each contribute 4 points.
+        // 0 + (4-0) + (4-0) + 0 = 8.
+        assert_eq!(score_pss4(&[0, 0, 0, 0]), Ok(8));
+    }
+
     // --- is_today_sunday ---
 
     #[test]
@@ -193,5 +215,23 @@ mod tests {
     #[test]
     fn is_today_sunday_true_for_sunday() {
         assert!(is_today_sunday(Weekday::Sun));
+    }
+
+    // --- pss4_history ---
+
+    #[test]
+    fn pss4_history_entries_are_well_formed() {
+        // pss4_history must never panic. In CI (no events.jsonl yet) it
+        // returns an empty Vec and exercises the File::open Err early-return.
+        // On a dev machine with history it validates every entry's invariants.
+        let entries = pss4_history();
+        for e in &entries {
+            assert!(
+                e.score <= 16,
+                "PSS-4 score {} out of valid range 0..=16",
+                e.score
+            );
+            assert!(!e.date.is_empty(), "date field must not be empty");
+        }
     }
 }
