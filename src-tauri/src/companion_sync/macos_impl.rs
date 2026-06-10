@@ -241,6 +241,11 @@ impl CompanionSync {
         let host = local_ipv4().ok_or_else(|| "no local IPv4 detected".to_string())?;
 
         let daemon = mdns_sd::ServiceDaemon::new().map_err(|e| format!("mdns daemon: {e}"))?;
+        // enable_addr_auto: the daemon tracks the host's IP addresses and
+        // re-announces the service whenever they change. Without it the
+        // advertised address is frozen at the IP captured here, so after a
+        // network switch or wake-from-sleep the phone can no longer discover
+        // the Mac until the app restarts.
         let service = mdns_sd::ServiceInfo::new(
             SERVICE_TYPE,
             INSTANCE_NAME,
@@ -249,7 +254,8 @@ impl CompanionSync {
             port,
             None,
         )
-        .map_err(|e| format!("mdns service info: {e}"))?;
+        .map_err(|e| format!("mdns service info: {e}"))?
+        .enable_addr_auto();
         daemon
             .register(service)
             .map_err(|e| format!("mdns register: {e}"))?;
