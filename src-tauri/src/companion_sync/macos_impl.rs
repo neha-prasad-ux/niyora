@@ -156,7 +156,15 @@ impl CompanionSync {
     }
 
     pub async fn unpair(&self, client_id: &str) -> Result<(), String> {
-        keychain::delete_peer_pubkey(client_id)?;
+        // Keychain cleanup is best-effort. A device paired by an earlier build
+        // with a different code signature leaves a keychain item this binary
+        // cannot delete ("Invalid attempt to change the owner of this item"),
+        // and a hard failure here would leave the device stuck in the paired
+        // list forever. Removing it from state is what the user actually asked
+        // for, so always do that; a stranded key is at worst a tiny leak.
+        if let Err(e) = keychain::delete_peer_pubkey(client_id) {
+            eprintln!("[companion_sync] unpair: keychain cleanup failed, removing anyway: {e}");
+        }
         state::remove(client_id)?;
         self.emit_state().await;
         Ok(())
